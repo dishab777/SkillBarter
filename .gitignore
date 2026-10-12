@@ -1,0 +1,19 @@
+
+# Java compiled files
+*.class
+
+# Java build output
+bin/
+out/
+target/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Environment files containing credentials
+.env
+.env.*
+
+# Logs
+*.log
