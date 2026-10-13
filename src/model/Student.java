@@ -3,7 +3,7 @@ package model;
 public class Student extends User {
     private String department;
     private int semester;
-    Student(int userID, String name, String email, String password, String department, int semester) {
+    public Student(int userID, String name, String email, String password, String department, int semester) {
         super(userID, name, email, password);
         this.department = department;
         this.semester = semester;
