@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Login — SkillBarter</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <nav class="navbar" id="mainNav">
+    <a href="index.html" class="brand">
+      <span class="brand-icon">SB</span> SkillBarter
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="login.html" class="active">Login</a></li>
+      <li><a href="register.html" class="btn btn-primary btn-sm">Register</a></li>
+    </ul>
+  </nav>
+
+  <main class="narrow-container">
+    <div class="card">
+      <div class="card-header">
+        <h2>Student Login</h2>
+      </div>
+
+      <div id="alertBox" class="alert"></div>
+
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label for="email">College Email Address *</label>
+          <input type="email" id="email" name="email" placeholder="alex@college.edu" required autocomplete="email">
+        </div>
+
+        <div class="form-group">
+          <label for="password">Password *</label>
+          <input type="password" id="password" name="password" placeholder="Enter your password" required autocomplete="current-password">
+        </div>
+
+        <button type="submit" id="submitBtn" class="btn btn-primary btn-block">
+          Log In
+        </button>
+      </form>
+
+      <p style="text-align: center; margin-top: 1.25rem; font-size: 0.9rem; color: var(--text-muted);">
+        Don't have an account yet? <a href="register.html" style="color: var(--secondary); font-weight: 600;">Sign up free</a>
+      </p>
+    </div>
+  </main>
+
+  <footer>
+    <p>&copy; 2026 SkillBarter — Peer Skill Exchange Platform</p>
+  </footer>
+
+  <script src="js/app.js"></script>
+  <script>
+    async function handleLogin(e) {
+      e.preventDefault();
+      const alertBox = document.getElementById('alertBox');
+      const submitBtn = document.getElementById('submitBtn');
+      SkillBarter.clearAlert(alertBox);
+
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+
+      if (!email || !password) {
+        SkillBarter.showAlert(alertBox, 'Please provide both email and password.', 'danger');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Verifying credentials...';
+
+      const res = await SkillBarter.apiCall('api/login', 'POST', { email, password });
+
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Log In';
+
+      if (res.ok && res.data.success) {
+        SkillBarter.showAlert(alertBox, 'Login successful! Redirecting to dashboard...', 'success');
+        setTimeout(() => {
+          window.location.href = 'dashboard.html';
+        }, 800);
+      } else {
+        SkillBarter.showAlert(alertBox, res.data.message || 'Invalid email or password. Please try again.', 'danger');
+      }
+    }
+  </script>
+</body>
+</html>

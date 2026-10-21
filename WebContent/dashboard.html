@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Dashboard — SkillBarter</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <nav class="navbar" id="mainNav"></nav>
+
+  <main class="container">
+    <div id="alertBox" class="alert"></div>
+
+    <!-- Welcome Header -->
+    <div class="card" style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color: #ffffff;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h1 id="welcomeHeading" style="color: #ffffff; margin-bottom: 0.25rem;">Welcome back!</h1>
+          <p id="subHeading" style="color: #bfdbfe; font-size: 1rem;">Loading your student profile...</p>
+        </div>
+        <div>
+          <a href="skills.html" class="btn btn-secondary btn-sm" style="background: rgba(255,255,255,0.15); color: #fff; border-color: rgba(255,255,255,0.3);">+ Add Skill</a>
+          <a href="matches.html" class="btn btn-secondary btn-sm" style="background: #ffffff; color: var(--primary);">View Matches</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Statistics Grid -->
+    <div class="grid-3" style="margin-bottom: 1.5rem;">
+      <div class="stat-box">
+        <div class="stat-number" id="teachCount">0</div>
+        <div class="stat-label">Skills You Teach</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-number" id="learnCount">0</div>
+        <div class="stat-label">Skills You Learn</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-number" id="pendingMatchCount">0</div>
+        <div class="stat-label">Pending Requests</div>
+      </div>
+    </div>
+
+    <!-- Two-column Section: Profile & Quick Actions -->
+    <div class="grid-2">
+      <!-- Profile Card -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Your Student Profile</h3>
+          <button id="editProfileBtn" class="btn btn-secondary btn-sm" onclick="toggleEditProfile()">Edit Profile</button>
+        </div>
+
+        <div id="profileView">
+          <p><strong>Name:</strong> <span id="profName">-</span></p>
+          <p><strong>Email:</strong> <span id="profEmail">-</span></p>
+          <p><strong>Department:</strong> <span id="profDept">-</span></p>
+          <p><strong>Semester:</strong> <span id="profSemester">-</span></p>
+          <p><strong>Account Role:</strong> <span class="badge badge-accepted" id="profRole">Student</span></p>
+        </div>
+
+        <form id="profileEditForm" style="display: none; margin-top: 1rem;" onsubmit="saveProfile(event)">
+          <div class="form-group">
+            <label for="editName">Full Name</label>
+            <input type="text" id="editName" required>
+          </div>
+          <div class="form-group">
+            <label for="editDept">Department</label>
+            <input type="text" id="editDept" required>
+          </div>
+          <div class="form-group">
+            <label for="editSem">Semester (1-12)</label>
+            <input type="number" id="editSem" min="1" max="12" required>
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditProfile()">Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Quick Actions & Next Steps -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Skill Barter Hub</h3>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.95rem; margin-bottom: 1rem;">
+          To find compatible exchange partners, make sure to add both skills you can offer (TEACH) and skills you need help with (LEARN).
+        </p>
+
+        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+          <a href="skills.html" class="skill-item" style="text-decoration: none; color: inherit;">
+            <div>
+              <strong>Manage Your Skills</strong>
+              <div style="font-size: 0.85rem; color: var(--text-muted);">Add new skills or browse peer offerings</div>
+            </div>
+            <span style="font-weight: 700; color: var(--secondary);">&rarr;</span>
+          </a>
+
+          <a href="matches.html" class="skill-item" style="text-decoration: none; color: inherit;">
+            <div>
+              <strong>Explore Reciprocal Matches</strong>
+              <div style="font-size: 0.85rem; color: var(--text-muted);">Find students with complementary learning needs</div>
+            </div>
+            <span style="font-weight: 700; color: var(--secondary);">&rarr;</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p>&copy; 2026 SkillBarter — Peer Skill Exchange Platform</p>
+  </footer>
+
+  <script src="js/app.js"></script>
+  <script>
+    let currentUser = null;
+
+    async function initDashboard() {
+      // Authenticate
+      currentUser = await SkillBarter.checkAuth(true);
+      if (!currentUser) return;
+
+      SkillBarter.renderNavbar(currentUser, 'dashboard');
+
+      // Populate profile view
+      document.getElementById('welcomeHeading').textContent = `Welcome back, ${currentUser.name}!`;
+      document.getElementById('subHeading').textContent = `${currentUser.department || 'Student'} • Semester ${currentUser.semester || 'N/A'}`;
+      document.getElementById('profName').textContent = currentUser.name;
+      document.getElementById('profEmail').textContent = currentUser.email;
+      document.getElementById('profDept').textContent = currentUser.department || 'N/A';
+      document.getElementById('profSemester').textContent = currentUser.semester || 'N/A';
+      document.getElementById('profRole').textContent = currentUser.role || 'Student';
+
+      // Load skill statistics
+      loadSkillStats();
+
+      // Load match statistics
+      loadMatchStats();
+    }
+
+    async function loadSkillStats() {
+      const res = await SkillBarter.apiCall('api/skills');
+      if (res.ok && res.data.success && res.data.data) {
+        const teach = res.data.data.teachSkills || [];
+        const learn = res.data.data.learnSkills || [];
+        document.getElementById('teachCount').textContent = teach.length;
+        document.getElementById('learnCount').textContent = learn.length;
+      }
+    }
+
+    async function loadMatchStats() {
+      const res = await SkillBarter.apiCall('api/matches');
+      if (res.ok && res.data.success && Array.isArray(res.data.data)) {
+        const matches = res.data.data;
+        const pending = matches.filter(m => m.status === 'PENDING').length;
+        document.getElementById('pendingMatchCount').textContent = pending;
+      }
+    }
+
+    function toggleEditProfile() {
+      const view = document.getElementById('profileView');
+      const form = document.getElementById('profileEditForm');
+      const btn = document.getElementById('editProfileBtn');
+
+      if (form.style.display === 'none') {
+        document.getElementById('editName').value = currentUser.name;
+        document.getElementById('editDept').value = currentUser.department;
+        document.getElementById('editSem').value = currentUser.semester;
+        form.style.display = 'block';
+        view.style.display = 'none';
+        btn.style.display = 'none';
+      } else {
+        form.style.display = 'none';
+        view.style.display = 'block';
+        btn.style.display = 'inline-block';
+      }
+    }
+
+    async function saveProfile(e) {
+      e.preventDefault();
+      const alertBox = document.getElementById('alertBox');
+      const name = document.getElementById('editName').value.trim();
+      const department = document.getElementById('editDept').value.trim();
+      const semester = parseInt(document.getElementById('editSem').value, 10);
+
+      const res = await SkillBarter.apiCall('api/profile', 'PUT', { name, department, semester: String(semester) });
+      if (res.ok && res.data.success) {
+        SkillBarter.showAlert(alertBox, 'Profile updated successfully!', 'success');
+        currentUser.name = name;
+        currentUser.department = department;
+        currentUser.semester = semester;
+        document.getElementById('profName').textContent = name;
+        document.getElementById('profDept').textContent = department;
+        document.getElementById('profSemester').textContent = semester;
+        document.getElementById('welcomeHeading').textContent = `Welcome back, ${name}!`;
+        document.getElementById('subHeading').textContent = `${department} • Semester ${semester}`;
+        toggleEditProfile();
+      } else {
+        SkillBarter.showAlert(alertBox, res.data.message || 'Failed to update profile.', 'danger');
+      }
+    }
+
+    initDashboard();
+  </script>
+</body>
+</html>

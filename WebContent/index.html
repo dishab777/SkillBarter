@@ -1,3 +1,89 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Peer Skill Exchange</title><link rel="stylesheet" href="css/style.css"></head>
-<body><main><h1>Peer Skill Exchange Platform</h1><p>Learn from peers. Share what you know.</p><nav><a href="register.html">Register</a> <a href="skills.html">Skills</a> <a href="matches.html">Matches</a></nav></main></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SkillBarter — Peer Skill Exchange Platform</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <nav class="navbar" id="mainNav">
+    <a href="index.html" class="brand">
+      <span class="brand-icon">SB</span> SkillBarter
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html" class="active">Home</a></li>
+      <li><a href="login.html">Login</a></li>
+      <li><a href="register.html" class="btn btn-primary btn-sm">Register</a></li>
+    </ul>
+  </nav>
+
+  <!-- Hero Section -->
+  <main class="container">
+    <section class="hero">
+      <h1>SkillBarter</h1>
+      <p class="lead"><strong>"Learn Together. Grow Together."</strong></p>
+      <p>A smart peer-to-peer skill exchange platform designed exclusively for college students. Teach what you excel at, learn what you're curious about, and collaborate with your peers with zero monetary cost.</p>
+      <div class="hero-actions">
+        <a href="register.html" class="btn btn-primary">Find Your Skill Partner</a>
+        <a href="login.html" class="btn btn-secondary">Student Login</a>
+      </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section class="card">
+      <div class="card-header">
+        <h2>How Peer Skill Barter Works</h2>
+      </div>
+      <div class="grid-3">
+        <div class="stat-box" style="text-align: left;">
+          <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary); margin-bottom: 0.5rem;">1. Offer &amp; Request</div>
+          <p style="font-size: 0.92rem; color: var(--text-muted);">List skills you are willing to <strong>TEACH</strong> (e.g. Java, Web Development) and skills you want to <strong>LEARN</strong> (e.g. Python, SQL).</p>
+        </div>
+        <div class="stat-box" style="text-align: left;">
+          <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary); margin-bottom: 0.5rem;">2. Reciprocal Matching</div>
+          <p style="font-size: 0.92rem; color: var(--text-muted);">Our matching engine identifies compatible peer students who want what you teach, and teach what you want to learn.</p>
+        </div>
+        <div class="stat-box" style="text-align: left;">
+          <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary); margin-bottom: 0.5rem;">3. Exchange &amp; Rate</div>
+          <p style="font-size: 0.92rem; color: var(--text-muted);">Connect with your peer, conduct your mutual learning sessions, mark the exchange as completed, and leave ratings.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Features Grid -->
+    <section class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon">&#127891;</div>
+        <h3>Campus-Focused</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">Built for college students across academic departments and semesters to foster peer mentoring.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128279;</div>
+        <h3>Reciprocal Exchange</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">Mutual benefit is guaranteed: exchange knowledge for knowledge, no money or currency needed.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#11088;</div>
+        <h3>Rated Exchanges</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">Build a verified peer learning reputation through authentic student exchange ratings.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>&copy; 2026 SkillBarter — Peer Skill Exchange Platform | Academic OOP Mini-Project</p>
+  </footer>
+
+  <script src="js/app.js"></script>
+  <script>
+    // Check if user is already logged in to customize navbar
+    (async () => {
+      const user = await SkillBarter.checkAuth(false);
+      SkillBarter.renderNavbar(user, 'home');
+    })();
+  </script>
+</body>
+</html>

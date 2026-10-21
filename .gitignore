@@ -1,19 +1,25 @@
-
-# Java compiled files
+# Java compiled class files
 *.class
+*.war
 
-# Java build output
+# Java build directories
 bin/
 out/
+build/
 target/
 
 # IDE settings
 .vscode/
 .idea/
+*.iml
+*.project
+*.classpath
+.settings/
 
-# Environment files containing credentials
+# Environment and sensitive credentials
 .env
 .env.*
+!.env.example
 
 # Logs
 *.log
