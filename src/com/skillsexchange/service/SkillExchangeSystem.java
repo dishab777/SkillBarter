@@ -12,8 +12,9 @@ import com.skillsexchange.model.Rating;
 
 public class SkillExchangeSystem {
 
-    private HashMap<Integer, Student> students = new HashMap<>();
-    private ArrayList<Session> sessions = new ArrayList<>();
+    private final HashMap<Integer, Student> students = new HashMap<>();
+    private final ArrayList<Session> sessions = new ArrayList<>();
+    private final ArrayList<Rating> ratings = new ArrayList<>();
 
     private int nextSessionId = 1;
     private int nextRatingId = 1;
@@ -30,6 +31,35 @@ public class SkillExchangeSystem {
     // Find student by ID
     public Student getStudent(int id) {
         return students.get(id);
+    }
+
+    public ArrayList<Student> getAllStudents() {
+        return new ArrayList<>(students.values());
+    }
+
+    public void updateStudent(int studentId, String name, String email) {
+        Student student = students.get(studentId);
+
+        if (student == null) {
+            throw new IllegalArgumentException("Student not found");
+        }
+
+        student.setName(name);
+        student.setEmail(email);
+    }
+
+    public void addSkillToStudent(int studentId, Skill skill, boolean offered) {
+        Student student = students.get(studentId);
+
+        if (student == null) {
+            throw new IllegalArgumentException("Student not found");
+        }
+
+        if (offered) {
+            student.addOfferedSkill(skill);
+        } else {
+            student.addWantedSkill(skill);
+        }
     }
 
     // Find mentors for a skill
@@ -161,9 +191,18 @@ public class SkillExchangeSystem {
             feedback
         );
 
+        ratings.add(rating);
         session.getMentor().addRating(rating);
 
         return rating;
+    }
+
+    public ArrayList<Session> getAllSessions() {
+        return new ArrayList<>(sessions);
+    }
+
+    public ArrayList<Rating> getAllRatings() {
+        return new ArrayList<>(ratings);
     }
 
     // Display all registered students

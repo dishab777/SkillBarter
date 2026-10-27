@@ -86,6 +86,23 @@ public class StudentDAO {
         return students;
     }
 
+    public void updateStudent(int studentId, String name, String email) throws SQLException {
+        String sql = "UPDATE public.student SET name = ?, email = ? WHERE student_id = ?";
+
+        try (Connection con = DBConnection.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+
+            ps.setString(1, name);
+            ps.setString(2, email);
+            ps.setInt(3, studentId);
+
+            int rowsUpdated = ps.executeUpdate();
+            if (rowsUpdated != 1) {
+                throw new SQLException("Student update failed. No row was updated.");
+            }
+        }
+    }
+
     // 4. Display all students stored in PostgreSQL
     public void displayStudents() throws SQLException {
 

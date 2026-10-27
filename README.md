@@ -1,36 +1,76 @@
-# SkillBarter
+﻿# SkillBarter
 
-SkillBarter is a peer-to-peer skill exchange project. People share skills they
+SkillBarter is a peer-to-peer skill exchange project. Students share skills they
 can teach, find mentors, and arrange sessions to learn from one another.
 
-The repository contains a Java console application and a React web frontend.
-The frontend starts in demo mode with realistic sample data, so it can be
-explored without running MySQL or the Java application.
+The repository contains a Java backend built with the JDK `HttpServer`, a React
+frontend, and a Supabase PostgreSQL database connection. The frontend can run
+in demo mode or connect to the Java API.
 
 ## Project structure
 
 ```text
-src/com/skillsexchange/       Java console application
-  Main.java                   Interactive command-line menu
-  database/                   MySQL connection and student DAO
-  model/                      User, student, skill, session, rating, and match
-  service/                    In-memory skill exchange operations
-frontend/                     React, Vite, and TypeScript web application
-  src/api/                    Frontend data access and demo persistence
+src/com/skillsexchange/
+  database/                   PostgreSQL JDBC connection and DAO logic
+  model/                      User, student, skill, session, rating, match
+  server/                     HttpServer-based REST API
+  service/                    In-memory system logic for mentor matches and sessions
+  Main.java                   Console demo entry point
+frontend/                     React, Vite, and TypeScript web app
+  src/api/                    Frontend API client and mock fallback logic
   src/data/                   Sample students, skills, sessions, and ratings
-  src/pages/                  Landing, dashboard, skills, exchanges, and profile
-  vercel.json                 SPA route rewrites for Vercel
-lib/                           MySQL Connector/J driver
+  src/pages/                  Landing, dashboard, skills, exchanges, and profile pages
+  .env.example                Frontend environment sample
+lib/                           PostgreSQL and Gson JARs
 out/                           Compiled Java classes, if built locally
 ```
 
-## Web frontend
+## Backend setup
 
-### Run locally
+The backend uses Java's built-in `com.sun.net.httpserver.HttpServer` and JDBC
+to connect to Supabase PostgreSQL. Configure the database credentials in the
+repository root `.env` file:
+
+```properties
+SUPABASE_DB_HOST=aws-0-ap-northeast-2.pooler.supabase.com
+SUPABASE_DB_PORT=5432
+SUPABASE_DB_NAME=postgres
+SUPABASE_DB_USER=postgres.<project-user>
+SUPABASE_DB_PASSWORD=<your-password>
+```
+
+Compile the Java source from the repository root:
+
+```powershell
+javac -cp ".\lib\postgresql-42.7.14.jar;.\lib\gson-2.13.1.jar" `
+  -d .\out `
+  (Get-ChildItem -Recurse .\src -Filter *.java | ForEach-Object { $_.FullName })
+```
+
+Start the API server:
+
+```powershell
+java -cp ".\out;.\lib\postgresql-42.7.14.jar;.\lib\gson-2.13.1.jar" com.skillsexchange.server.ApiServer
+```
+
+The server exposes endpoints such as:
+
+- `GET /api/health`
+- `GET /api/students`
+- `POST /api/students`
+- `PUT /api/students/{id}`
+- `GET /api/mentors?skillName=...&learnerId=...`
+- `GET /api/sessions`
+- `POST /api/sessions`
+- `PUT /api/sessions/{id}/complete`
+- `POST /api/sessions/{id}/ratings`
+- `GET /api/ratings`
+
+## Frontend setup
 
 Requirements: Node.js and npm.
 
-In PowerShell, from the repository root:
+From the repository root:
 
 ```powershell
 cd .\frontend
@@ -38,96 +78,43 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite, usually `http://localhost:5173`. Stop the
-development server with **Ctrl+C**.
+Open the local URL printed by Vite, usually `http://localhost:5173`.
 
-To build and locally preview the production frontend:
+Set these frontend variables in `frontend/.env.local` when you want to use the
+Java backend instead of demo data:
 
-```powershell
-npm run build
-npm run preview
+```properties
+VITE_USE_MOCK=false
+VITE_API_BASE_URL=http://localhost:8080
 ```
 
-Vite writes the production build to `frontend/dist/`. The Vercel configuration
-rewrites application routes to the SPA entry point, allowing pages to load on
-direct navigation and refresh.
+If `VITE_USE_MOCK` is omitted, the app defaults to demo mode for a quick
+exploration experience. The API client will make HTTP calls to the backend only
+when the mock flag is disabled.
 
-### Demo data and settings
+## Database model
 
-The default configuration uses mock data; no environment file is needed. To
-create a local environment file, copy the example:
+The Java DAO expects a PostgreSQL table named `public.student` with at least the
+following columns:
 
-```powershell
-Copy-Item .env.example .env.local
+```sql
+CREATE TABLE public.student (
+    student_id integer PRIMARY KEY,
+    name text NOT NULL,
+    email text NOT NULL UNIQUE
+);
 ```
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `VITE_USE_MOCK` | `true` | Uses bundled sample data and browser-local persistence. |
-| `VITE_API_BASE_URL` | `http://localhost:8080` in `.env.example` | Reserved base URL for a future backend HTTP API. |
+The project also includes Java model classes for skills, sessions, ratings, and
+mentor matching. These are connected to the backend API through the DAO and
+service classes.
 
-Edit the example data in `frontend/src/data/skills.ts`,
-`frontend/src/data/users.ts`, `frontend/src/data/exchanges.ts`, and
-`frontend/src/data/reviews.ts`. The files include comments describing their
-backend-shaped data. After editing the bundled sample data, use **Reset demo
-data** in the app, or clear the browser's `localStorage`, to discard an older
-saved demo and load the edited examples.
+## Demo data and local persistence
 
-Interactions such as new profiles, skills, sessions, and ratings are saved in
-the current browser's `localStorage`. They are local to that browser and are
-not shared between visitors or persisted to MySQL.
+The bundled sample data under `frontend/src/data/` remains available for a
+self-contained demo. Interactions are saved in the browser's localStorage when
+mock mode is enabled.
 
-### Deploy to Vercel
-
-Configure the Vercel project with:
-
-- **Root Directory:** `frontend`
-- **Framework Preset:** Vite
-- **Build Command:** `npm run build`
-- **Output Directory:** `dist`
-
-Keep `VITE_USE_MOCK=true` for a self-contained deployed demo. Changing
-`VITE_API_BASE_URL` alone does not connect the frontend to the Java application.
-
-## Java console application
-
-Requirements: a JDK and a running MySQL server. The application connects to
-the `peer_skill_exchange` database. Review
-[`DBConnection.java`](src/com/skillsexchange/database/DBConnection.java) and
-configure its connection URL and credentials for your local MySQL instance.
-The DAO expects a `Student` table with `student_id`, `name`, and `email`
-columns; the repository currently does not include a SQL schema.
-
-From the repository root in PowerShell, compile the Java source files:
-
-```powershell
-javac -cp ".\lib\mysql-connector-j-26.10.0.jar" `
-  -d .\out `
-  (Get-ChildItem -Recurse .\src -Filter *.java | ForEach-Object { $_.FullName })
-```
-
-Run the interactive application:
-
-```powershell
-java -cp ".\out;.\lib\mysql-connector-j-26.10.0.jar" com.skillsexchange.Main
-```
-
-The Java menu supports student registration, adding offered or wanted skills,
-viewing profiles, searching for mentors, scheduling and viewing sessions,
-completing sessions, rating mentors, and listing students. Student records are
-written through the MySQL DAO. Skills and sessions are managed in memory by
-the application and are not exposed through a web API.
-
-## Backend integration status
-
-The Java application is a console program, not an HTTP server. It currently
-provides no REST controllers, HTTP endpoints, authentication, or API error
-responses. Consequently, the frontend's functional workflows currently use
-sample data and browser-local storage. The frontend reports an error if mock
-mode is turned off rather than sending requests to nonexistent endpoints.
-
-To connect the frontend to a hosted backend, the Java project first needs an
-HTTP API for the frontend operations. Configure that API to allow requests
-from the deployed frontend's origin (CORS), then set `VITE_USE_MOCK=false` and
-`VITE_API_BASE_URL` to the hosted API URL when the API integration is
-implemented.
+The app is intentionally simple and maintainable for an academic OOP mini-
+project, with a clear separation between the React UI, Java HTTP server, and the
+PostgreSQL data layer.

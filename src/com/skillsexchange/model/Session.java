@@ -42,6 +42,14 @@ public class Session {
         return skill;
     }
 
+    public String getDate() {
+        return date;
+    }
+
+    public String getTime() {
+        return time;
+    }
+
     public SessionStatus getStatus() {
         return status;
     }

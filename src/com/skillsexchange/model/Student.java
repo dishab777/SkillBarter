@@ -49,6 +49,10 @@ public class Student extends User
         return total / ratings.size();
     }
 
+    public ArrayList<Rating> getRatings() {
+        return new ArrayList<>(ratings);
+    }
+
     public ArrayList<Skill> getOfferedSkills() {
         return new ArrayList<>(offeredSkills);
     }

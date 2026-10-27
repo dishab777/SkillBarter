@@ -21,17 +21,28 @@ public class DBConnection {
     private static final String PASSWORD =
             System.getenv("SUPABASE_DB_PASSWORD");
 
+    public static boolean isConfigured() {
+        return HOST != null && !HOST.trim().isEmpty()
+                && PORT != null && !PORT.trim().isEmpty()
+                && DATABASE != null && !DATABASE.trim().isEmpty()
+                && USER != null && !USER.trim().isEmpty()
+                && PASSWORD != null && !PASSWORD.trim().isEmpty();
+    }
+
     public static Connection getConnection() throws SQLException {
 
-        if (HOST == null || HOST.trim().isEmpty()
-                || PORT == null || PORT.trim().isEmpty()
-                || DATABASE == null || DATABASE.trim().isEmpty()
-                || USER == null || USER.trim().isEmpty()
-                || PASSWORD == null || PASSWORD.isEmpty()) {
-
+        if (!isConfigured()) {
             throw new SQLException(
                     "Database configuration is missing. "
                     + "Set the SUPABASE_DB_* environment variables."
+            );
+        }
+
+        try {
+            Class.forName("org.postgresql.Driver");
+        } catch (ClassNotFoundException e) {
+            throw new SQLException(
+                    "PostgreSQL JDBC driver not found in the classpath.", e
             );
         }
 
