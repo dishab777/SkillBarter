@@ -1,11 +1,17 @@
-
 package com.skillsexchange;
 
-import com.skillsexchange.database.StudentDAO;
-import com.skillsexchange.model.*;
-import com.skillsexchange.service.SkillExchangeSystem;
+import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Scanner;
+
+import com.skillsexchange.database.StudentDAO;
+import com.skillsexchange.model.Match;
+import com.skillsexchange.model.Rating;
+import com.skillsexchange.model.Session;
+import com.skillsexchange.model.Skill;
+import com.skillsexchange.model.Student;
+import com.skillsexchange.service.SkillExchangeSystem;
 
 public class Main {
 
@@ -14,6 +20,9 @@ public class Main {
     static StudentDAO studentDAO = new StudentDAO();
 
     public static void main(String[] args) {
+
+        // Load previously registered students from PostgreSQL
+        loadStudentsFromDatabase();
 
         int choice = -1;
 
@@ -35,48 +44,76 @@ public class Main {
             System.out.print("Enter your choice: ");
 
             try {
-                choice = Integer.parseInt(sc.nextLine());
+                choice = Integer.parseInt(sc.nextLine().trim());
 
                 switch (choice) {
+
                     case 1:
                         registerStudent();
                         break;
+
                     case 2:
                         addSkill(true);
                         break;
+
                     case 3:
                         addSkill(false);
                         break;
+
                     case 4:
                         viewProfile();
                         break;
+
                     case 5:
                         searchMentors();
                         break;
+
                     case 6:
                         scheduleSession();
                         break;
+
                     case 7:
                         system.displaySessions();
                         break;
+
                     case 8:
                         completeSession();
                         break;
+
                     case 9:
                         rateMentor();
                         break;
+
                     case 10:
-                        system.displayStudents();
+                        displayAllStudents();
                         break;
+
                     case 0:
-                        System.out.println("Thank you for using the platform!");
+                        System.out.println(
+                            "Thank you for using the platform!"
+                        );
                         break;
+
                     default:
-                        System.out.println("Invalid choice!");
+                        System.out.println(
+                            "Invalid choice! Please select a valid option."
+                        );
                 }
 
+            } catch (NumberFormatException e) {
+                System.out.println(
+                    "Invalid input. Please enter a valid number."
+                );
+
+            } catch (SQLException e) {
+                System.out.println(
+                    "Database error: " + e.getMessage()
+                );
+
             } catch (Exception e) {
-                System.out.println("Error: " + e.getMessage());
+                System.out.println(
+                    "Error: " + e.getMessage()
+                );
             }
 
         } while (choice != 0);
@@ -84,35 +121,107 @@ public class Main {
         sc.close();
     }
 
+    // Load students saved in PostgreSQL into the application
+    public static void loadStudentsFromDatabase() {
+
+        try {
+            List<Student> students = studentDAO.getAllStudents();
+
+            for (Student student : students) {
+                system.registerStudent(student);
+            }
+
+            System.out.println(
+                "Database connection successful."
+            );
+
+            System.out.println(
+                students.size() + " student(s) loaded from PostgreSQL."
+            );
+
+        } catch (SQLException e) {
+            System.out.println(
+                "Could not load students from PostgreSQL: "
+                + e.getMessage()
+            );
+
+            System.out.println(
+                "Please check your database configuration and connection."
+            );
+        }
+    }
+
     // 1. Register Student
-    public static void registerStudent() {
+    public static void registerStudent() throws SQLException {
 
         System.out.print("Enter Student ID: ");
-        int id = Integer.parseInt(sc.nextLine());
+        int id = Integer.parseInt(sc.nextLine().trim());
 
         System.out.print("Enter Name: ");
-        String name = sc.nextLine();
+        String name = sc.nextLine().trim();
 
         System.out.print("Enter Email: ");
-        String email = sc.nextLine();
+        String email = sc.nextLine().trim();
 
+        // Basic input validation
+        if (name.isEmpty() || email.isEmpty()) {
+            System.out.println(
+                "Name and email cannot be empty."
+            );
+            return;
+        }
+
+        // Check the database, not just the in-memory collection
+        if (studentDAO.getStudent(id) != null) {
+            System.out.println(
+                "Student ID already exists in the database!"
+            );
+            return;
+        }
+
+        // Check whether this ID is already in the running application
         if (system.getStudent(id) != null) {
-            System.out.println("Student ID already registered!");
+            System.out.println(
+                "Student ID is already registered in the application!"
+            );
             return;
         }
 
         Student student = new Student(id, name, email);
 
         try {
+            // Save to PostgreSQL first
             studentDAO.addStudent(student);
+
+            // Add to the application's in-memory system only after
+            // the database insert succeeds
             system.registerStudent(student);
 
-            System.out.println("Student registered successfully!");
-            System.out.println("Student saved to MySQL!");
+            System.out.println(
+                "\nStudent registered successfully!"
+            );
 
-        } catch (java.sql.SQLException e) {
-            System.out.println("Database error: " + e.getMessage());
-            System.out.println("Student registration failed.");
+            System.out.println(
+                "Student saved to Supabase PostgreSQL."
+            );
+
+            System.out.println("Student ID: " + id);
+            System.out.println("Name: " + name);
+            System.out.println("Email: " + email);
+
+        } catch (SQLException e) {
+
+            System.out.println(
+                "\nStudent registration failed."
+            );
+
+            System.out.println(
+                "Database error: " + e.getMessage()
+            );
+
+            // Do not add the student to the in-memory system
+            // when the database insert fails.
+            throw e;
         }
     }
 
@@ -120,7 +229,7 @@ public class Main {
     public static void addSkill(boolean offered) {
 
         System.out.print("Enter Student ID: ");
-        int id = Integer.parseInt(sc.nextLine());
+        int id = Integer.parseInt(sc.nextLine().trim());
 
         Student student = system.getStudent(id);
 
@@ -130,18 +239,21 @@ public class Main {
         }
 
         System.out.print("Enter Skill ID: ");
-        int skillId = Integer.parseInt(sc.nextLine());
+        int skillId = Integer.parseInt(sc.nextLine().trim());
 
         System.out.print("Enter Skill Name: ");
-        String name = sc.nextLine();
+        String name = sc.nextLine().trim();
 
         System.out.print("Enter Category: ");
-        String category = sc.nextLine();
+        String category = sc.nextLine().trim();
 
-        System.out.println("Available Levels:");
-        System.out.println("NONE, BEGINNER, INTERMEDIATE, ADVANCED, EXPERT");
+        System.out.println("\nAvailable Levels:");
+        System.out.println(
+            "NONE, BEGINNER, INTERMEDIATE, ADVANCED, EXPERT"
+        );
 
         System.out.print("Enter Level: ");
+
         Skill.Level level = Skill.Level.valueOf(
             sc.nextLine().trim().toUpperCase()
         );
@@ -150,30 +262,42 @@ public class Main {
 
         if (!offered) {
             System.out.print("Enter Learning Goal: ");
-            goal = sc.nextLine();
+            goal = sc.nextLine().trim();
         }
 
-        Skill skill = new Skill(skillId, name, category, level, goal);
+        Skill skill = new Skill(
+            skillId,
+            name,
+            category,
+            level,
+            goal
+        );
 
         if (offered) {
             student.addOfferedSkill(skill);
             System.out.println("Offered skill added!");
+
         } else {
             student.addWantedSkill(skill);
             System.out.println("Wanted skill added!");
         }
+
+        System.out.println(
+            "Note: Skills are currently stored in application memory."
+        );
     }
 
     // 4. View Student Profile
     public static void viewProfile() {
 
         System.out.print("Enter Student ID: ");
-        int id = Integer.parseInt(sc.nextLine());
+        int id = Integer.parseInt(sc.nextLine().trim());
 
         Student student = system.getStudent(id);
 
         if (student != null) {
             student.displayProfile();
+
         } else {
             System.out.println("Student not found!");
         }
@@ -183,7 +307,7 @@ public class Main {
     public static void searchMentors() {
 
         System.out.print("Enter Your Student ID: ");
-        int learnerId = Integer.parseInt(sc.nextLine());
+        int learnerId = Integer.parseInt(sc.nextLine().trim());
 
         if (system.getStudent(learnerId) == null) {
             System.out.println("Student not found!");
@@ -191,7 +315,7 @@ public class Main {
         }
 
         System.out.print("Enter Skill to Learn: ");
-        String skillName = sc.nextLine();
+        String skillName = sc.nextLine().trim();
 
         ArrayList<Match> matches =
             system.findMentors(skillName, learnerId);
@@ -212,33 +336,41 @@ public class Main {
     public static void scheduleSession() {
 
         System.out.print("Enter Mentor ID: ");
-        int mentorId = Integer.parseInt(sc.nextLine());
+        int mentorId = Integer.parseInt(sc.nextLine().trim());
 
         System.out.print("Enter Learner ID: ");
-        int learnerId = Integer.parseInt(sc.nextLine());
+        int learnerId = Integer.parseInt(sc.nextLine().trim());
 
         System.out.print("Enter Skill Name: ");
-        String skill = sc.nextLine();
+        String skill = sc.nextLine().trim();
 
         System.out.print("Enter Date (YYYY-MM-DD): ");
-        String date = sc.nextLine();
+        String date = sc.nextLine().trim();
 
         System.out.print("Enter Time (HH:MM): ");
-        String time = sc.nextLine();
+        String time = sc.nextLine().trim();
 
         Session session = system.scheduleSession(
-            mentorId, learnerId, skill, date, time
+            mentorId,
+            learnerId,
+            skill,
+            date,
+            time
         );
 
         System.out.println("Session scheduled successfully!");
         System.out.println(session);
+
+        System.out.println(
+            "Note: Sessions are currently stored in application memory."
+        );
     }
 
     // 8. Complete Session
     public static void completeSession() {
 
         System.out.print("Enter Session ID: ");
-        int id = Integer.parseInt(sc.nextLine());
+        int id = Integer.parseInt(sc.nextLine().trim());
 
         system.completeSession(id);
 
@@ -249,17 +381,37 @@ public class Main {
     public static void rateMentor() {
 
         System.out.print("Enter Completed Session ID: ");
-        int id = Integer.parseInt(sc.nextLine());
+        int id = Integer.parseInt(sc.nextLine().trim());
 
         System.out.print("Enter Rating (1-5): ");
-        int score = Integer.parseInt(sc.nextLine());
+        int score = Integer.parseInt(sc.nextLine().trim());
+
+        if (score < 1 || score > 5) {
+            System.out.println(
+                "Invalid rating. Please enter a score between 1 and 5."
+            );
+            return;
+        }
 
         System.out.print("Enter Feedback: ");
-        String feedback = sc.nextLine();
+        String feedback = sc.nextLine().trim();
 
-        Rating rating = system.rateMentor(id, score, feedback);
+        Rating rating = system.rateMentor(
+            id,
+            score,
+            feedback
+        );
 
         System.out.println("Rating submitted successfully!");
         System.out.println("Score: " + rating.getScore());
+
+        System.out.println(
+            "Note: Ratings are currently stored in application memory."
+        );
+    }
+
+    // 10. Display students directly from PostgreSQL
+    public static void displayAllStudents() throws SQLException {
+        studentDAO.displayStudents();
     }
 }
