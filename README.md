@@ -176,3 +176,41 @@ npm run build
 ```
 
 Vite writes the production bundle to `frontend/dist/`.
+
+## Deploy the frontend to Vercel
+
+Vercel hosts the React/Vite frontend; it does not start this project's Core
+Java `HttpServer`. Deploy the Java API separately to a Java-capable host and
+configure that service with the `SUPABASE_DB_*` variables. Keep the API
+running and reachable over HTTPS.
+
+In the Vercel project settings:
+
+1. Set **Root Directory** to `frontend`.
+2. Add `VITE_API_BASE_URL` for the Production environment with the public HTTPS
+   origin of the Java API, for example `https://api.example.com`. Do not add
+   `/api` to the value; the frontend appends `/api/...` itself.
+3. Redeploy after adding or changing the variable. Vite embeds `VITE_*`
+   settings during the build, so changing a Vercel variable does not update an
+   already-built deployment.
+
+In the Java API host's environment settings:
+
+1. Set `CORS_ALLOWED_ORIGIN` to the exact frontend origin, such as
+   `https://skill-barter-pi.vercel.app` (no trailing slash).
+2. Set `APP_COOKIE_SECURE=true` and retain the database variables on the
+   server only.
+3. Restart/redeploy the API after changing environment variables.
+
+With `APP_COOKIE_SECURE=true`, the API marks the session cookie `Secure` and
+`SameSite=None` so cross-origin HTTPS fetch requests can send it. Browsers or
+privacy settings that block third-party cookies may still prevent sessions
+when the frontend and API are on unrelated domains. For the most reliable
+authentication, use frontend and API hostnames under the same custom domain
+(for example `app.example.com` and `api.example.com`) or proxy `/api` through
+the frontend's same site.
+
+If the login page reports that it cannot connect to `http://localhost:8080`,
+the deployed bundle is using its local-development default. Configure
+`VITE_API_BASE_URL` in Vercel and redeploy; `localhost` on a visitor's device
+is not your deployed API.

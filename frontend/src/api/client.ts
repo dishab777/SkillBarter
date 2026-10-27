@@ -5,8 +5,9 @@ import type {
   Student,
 } from "../types/models";
 
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
 export const apiBaseUrl =
-  import.meta.env.VITE_API_BASE_URL?.trim() || "http://localhost:8080";
+  configuredApiBaseUrl || (import.meta.env.DEV ? "http://localhost:8080" : "");
 
 export class ApiError extends Error {
   constructor(
@@ -22,6 +23,12 @@ async function requestJson<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  if (!apiBaseUrl) {
+    throw new Error(
+      "The SkillBarter API URL is not configured. Set VITE_API_BASE_URL in your Vercel project settings and redeploy.",
+    );
+  }
+
   let response: Response;
   try {
     response = await fetch(

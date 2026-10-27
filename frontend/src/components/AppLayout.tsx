@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUpRight, LogOut, Moon, Sun } from "lucide-react";
+import { ArrowUpRight, LogOut, Moon, Repeat2, Sun } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
@@ -31,7 +31,7 @@ export function AppLayout() {
     <div className="app-shell">
       <header className={mobileOpen ? "site-header mobile-menu-open" : "site-header"}>
         <Link className="brand" to="/" aria-label="SkillBarter home">
-          <span className="brand-mark">s<span>b</span></span>
+          <span className="brand-mark"><Repeat2 aria-hidden="true" /></span>
           <span>skillbarter<span className="brand-period">.</span></span>
         </Link>
         <nav className="main-nav" aria-label="Main navigation">
@@ -95,5 +95,5 @@ export function SectionHeading({
 }
 
 function Footer() {
-  return <footer className="site-footer"><Link className="brand brand--footer" to="/"><span className="brand-mark">s<span>b</span></span><span>skillbarter<span className="brand-period">.</span></span></Link><span>Good things happen when we teach each other.</span><a href="#top">Back to top ↑</a></footer>;
+  return <footer className="site-footer"><Link className="brand brand--footer" to="/"><span className="brand-mark"><Repeat2 aria-hidden="true" /></span><span>skillbarter<span className="brand-period">.</span></span></Link><span>Good things happen when we teach each other.</span><a href="#top">Back to top ↑</a></footer>;
 }

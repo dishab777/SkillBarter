@@ -57,8 +57,8 @@ h1, h2, h3 { color: var(--ink); }
 
 .site-header { height: 82px; padding: 0 max(6.25vw, calc((100vw - 1300px) / 2)); display: flex; align-items: center; gap: 60px; position: relative; z-index: 10; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--page) 88%, transparent); backdrop-filter: blur(18px); }
 .brand { display: inline-flex; gap: 10px; align-items: center; flex-shrink: 0; color: var(--ink); font-weight: 700; letter-spacing: -0.055em; font-size: 18px; }
-.brand-mark { width: 30px; height: 30px; border-radius: 10px 10px 10px 3px; display: grid; place-items: center; background: #174b45; color: #d2df80; font-family: var(--display); font-size: 17px; font-weight: 700; letter-spacing: -0.1em; transform: rotate(-5deg); }
-.brand-mark span { color: #fffefa; }
+.brand-mark { width: 30px; height: 30px; border-radius: 10px 10px 10px 3px; display: grid; place-items: center; background: #174b45; color: #42a5ed; transform: rotate(-5deg); }
+.brand-mark svg { width: 20px; height: 20px; stroke-width: 2.2; }
 .brand-period { color: #d48869; }
 .main-nav { display: flex; align-items: center; gap: 34px; height: 100%; }
 .nav-link { display: inline-flex; align-items: center; position: relative; height: 100%; color: var(--muted); font-size: 13px; font-weight: 600; transition: color 0.2s ease; }
@@ -175,7 +175,8 @@ h1, h2, h3 { color: var(--ink); }
 .closing-cta__mark span { color: rgba(232, 167, 131, 0.13); }
 .site-footer { min-height: 93px; display: flex; align-items: center; justify-content: space-between; gap: 25px; padding: 18px max(6.25vw, calc((100vw - 1300px) / 2)); color: var(--muted); font-size: 10px; }
 .brand--footer { font-size: 14px; }
-.brand--footer .brand-mark { width: 25px; height: 25px; font-size: 14px; }
+.brand--footer .brand-mark { width: 25px; height: 25px; }
+.brand--footer .brand-mark svg { width: 17px; height: 17px; }
 .site-footer > a:last-child { color: #3c7469; font-weight: 600; }
 
 .content-page { padding-top: 63px; padding-bottom: 90px; }

@@ -412,9 +412,11 @@ public class ApiServer {
     }
 
     private static String sessionCookie(String token, int maxAge) {
+        boolean secure = Boolean.parseBoolean(System.getenv("APP_COOKIE_SECURE"));
         String cookie = SESSION_COOKIE + "=" + token
-                + "; HttpOnly; SameSite=Lax; Path=/; Max-Age=" + maxAge;
-        if (Boolean.parseBoolean(System.getenv("APP_COOKIE_SECURE"))) {
+                + "; HttpOnly; SameSite=" + (secure ? "None" : "Lax")
+                + "; Path=/; Max-Age=" + maxAge;
+        if (secure) {
             cookie += "; Secure";
         }
         return cookie;
