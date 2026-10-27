@@ -12,10 +12,14 @@ import com.skillsexchange.model.Student;
 public class StudentDAO {
 
     // 1. Register a student in the PostgreSQL database
-    public void addStudent(Student student) throws SQLException {
+    public void addStudent(Student student, String passwordHash) throws SQLException {
+        if (passwordHash == null || passwordHash.trim().isEmpty()) {
+            throw new IllegalArgumentException("A password hash is required.");
+        }
 
         String sql = "INSERT INTO public.student "
-                   + "(student_id, name, email) VALUES (?, ?, ?)";
+                   + "(student_id, name, email, password_hash) "
+                   + "VALUES (?, ?, ?, ?)";
 
         try (Connection con = DBConnection.getConnection();
              PreparedStatement ps = con.prepareStatement(sql)) {
@@ -23,6 +27,7 @@ public class StudentDAO {
             ps.setInt(1, student.getUserId());
             ps.setString(2, student.getName());
             ps.setString(3, student.getEmail());
+            ps.setString(4, passwordHash);
 
             int rowsInserted = ps.executeUpdate();
 
@@ -32,6 +37,26 @@ public class StudentDAO {
                 );
             }
         }
+    }
+
+    public Student getStudentByEmail(String email) throws SQLException {
+        String sql = "SELECT student_id, name, email "
+                   + "FROM public.student WHERE lower(email) = lower(?)";
+
+        try (Connection con = DBConnection.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, email);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return new Student(
+                        rs.getInt("student_id"),
+                        rs.getString("name"),
+                        rs.getString("email")
+                    );
+                }
+            }
+        }
+        return null;
     }
 
     // 2. Find a student by ID

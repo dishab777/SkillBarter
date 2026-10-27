@@ -25,8 +25,8 @@ frontend/                     React, Vite, and TypeScript web application
   src/api/                    HTTP API client (no runtime mock-data fallback)
   src/context/                Authenticated user and fetched API state
   src/pages/                  Login, registration, profile, skills, dashboard
-database/migrations/          Non-destructive case-insensitive email indexes
-lib/                           PostgreSQL and Gson JARs
+database/migrations/          Non-destructive email and password migrations
+lib/                           PostgreSQL, Gson, and BCrypt JARs
 out/                           Java compilation output
 ```
 
@@ -36,9 +36,11 @@ The application was checked against the live public schema. It contains:
 
 - `public.users`: `user_id`, `name`, `email`, `password_hash`, `created_at`.
   The password hash is non-null, and user ID/email have unique constraints.
-- `public.student`: `student_id`, `name`, `email`. It has a primary key and
-  unique email constraint. New web registrations create both rows in one
-  transaction using the entered student ID.
+- `public.student`: `student_id`, `name`, `email`, and nullable
+  `password_hash`. It has a primary key and unique email constraint. New web
+  registrations create both user/profile rows in one transaction using the
+  entered student ID; console registrations store a BCrypt hash in the
+  student's nullable password column.
 - `public.user_skills`: `skill_id`, `user_id`, `skill_name`, `skill_type`,
   `created_at`. Skill type is constrained to `TEACH` or `LEARN`; the user ID
   references `users`.
@@ -52,10 +54,14 @@ row is not considered an authenticated account because it has no corresponding
 
 Apply [`001_auth_skills.sql`](database/migrations/001_auth_skills.sql) using the
 Supabase SQL Editor to enforce case-insensitive email uniqueness at the
-database level. It does not delete or rewrite existing records. Skill IDs are
-allocated transactionally by the DAO because the inspected `user_skills`
-primary key has no sequence/default. Authentication uses the existing
-`users.password_hash` column and does not require adding a password column.
+database level. Apply
+[`002_console_student_password.sql`](database/migrations/002_console_student_password.sql)
+to add the nullable `student.password_hash` column for console registrations.
+Both migrations preserve existing records. Older students keep a `NULL`
+password hash; no password is invented for them. Skill IDs are allocated
+transactionally by the DAO because the inspected `user_skills` primary key
+has no sequence/default. Web authentication continues to use the existing
+`users.password_hash` column.
 If applying the migration to a database with existing users, resolve any
 emails that differ only by letter case first; PostgreSQL cannot create the
 unique indexes while such duplicates exist.
@@ -93,11 +99,11 @@ Get-Content .\.env | ForEach-Object {
 
 Get-ChildItem .\lib
 
-javac -cp ".\lib\postgresql-42.7.14.jar;.\lib\gson-2.13.1.jar" `
+javac -cp ".\lib\postgresql-42.7.14.jar;.\lib\gson-2.13.1.jar;.\lib\jbcrypt-0.4.jar" `
   -d .\out `
   (Get-ChildItem -Recurse .\src -Filter *.java | ForEach-Object { $_.FullName })
 
-java -cp ".\out;.\lib\postgresql-42.7.14.jar;.\lib\gson-2.13.1.jar" `
+java -cp ".\out;.\lib\postgresql-42.7.14.jar;.\lib\gson-2.13.1.jar;.\lib\jbcrypt-0.4.jar" `
   com.skillsexchange.server.ApiServer
 ```
 
@@ -167,6 +173,61 @@ feedback. Those flows are explicitly unavailable in the UI and API instead of
 showing fabricated sessions or ratings. The `user_skills` schema stores skill
 names and whether they are for teaching (`TEACH`) or learning (`LEARN`); the
 frontend only requests and displays those stored fields.
+
+## Console registration passwords
+
+The separate console menu (`com.skillsexchange.Main`, option 1) asks for and
+confirms a password using Java's `Console.readPassword`, so typed characters
+are not echoed. Run it from a real Windows Terminal/PowerShell window; IDE
+output panes often have no `System.console()`, in which case registration
+stops with an explanation instead of accepting a visible password. The
+password is hashed with the standalone jBCrypt 0.4 library (BCrypt cost 12)
+and only the hash is written to `public.student.password_hash`. Password
+character arrays are cleared after use. BCrypt's 72-byte input limit is
+validated so long passwords are not silently truncated.
+
+The console and web sign-in paths currently use different existing tables:
+console registration writes a BCrypt hash to `student.password_hash`, while
+web registration/login use PBKDF2 hashes in `users.password_hash`. Do not
+copy a hash between those columns or assume the console account can sign into
+the web application; unifying those flows would require a separate migration
+and authentication design.
+
+### Run the console application
+
+Apply the password-column migration first, then open a PowerShell terminal:
+
+```powershell
+Set-Location C:\Users\hp\Documents\SkillBarter
+
+Get-Content .\.env | ForEach-Object {
+  if ($_ -match '^(.*?)=(.*)$') {
+    [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+  }
+}
+
+$sources = Get-ChildItem .\src -Filter *.java -Recurse |
+  ForEach-Object { $_.FullName }
+
+javac -cp ".\lib\postgresql-42.7.14.jar;.\lib\gson-2.13.1.jar;.\lib\jbcrypt-0.4.jar" `
+  -d .\out $sources
+
+java -cp ".\out;.\lib\postgresql-42.7.14.jar;.\lib\gson-2.13.1.jar;.\lib\jbcrypt-0.4.jar" `
+  com.skillsexchange.Main
+```
+
+`lib/jbcrypt-0.4.jar` is the standalone `org.mindrot:jbcrypt:0.4` dependency;
+no Maven or Gradle is required. If you need to restore it, download the JAR
+from Maven Central at
+`https://repo.maven.apache.org/maven2/org/mindrot/jbcrypt/0.4/jbcrypt-0.4.jar`
+and place it in `lib`.
+
+The migration SQL is:
+
+```sql
+ALTER TABLE public.student
+    ADD COLUMN IF NOT EXISTS password_hash TEXT;
+```
 
 ## Frontend build
 

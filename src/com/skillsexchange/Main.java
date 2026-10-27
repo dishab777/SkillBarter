@@ -2,8 +2,10 @@ package com.skillsexchange;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Scanner;
+import java.io.Console;
 
 import com.skillsexchange.database.StudentDAO;
 import com.skillsexchange.model.Match;
@@ -12,10 +14,12 @@ import com.skillsexchange.model.Session;
 import com.skillsexchange.model.Skill;
 import com.skillsexchange.model.Student;
 import com.skillsexchange.service.SkillExchangeSystem;
+import com.skillsexchange.service.PasswordService;
 
 public class Main {
 
     static Scanner sc = new Scanner(System.in);
+    private static final Console CONSOLE = System.console();
     static SkillExchangeSystem system = new SkillExchangeSystem();
     static StudentDAO studentDAO = new StudentDAO();
 
@@ -44,7 +48,7 @@ public class Main {
             System.out.print("Enter your choice: ");
 
             try {
-                choice = Integer.parseInt(sc.nextLine().trim());
+                choice = Integer.parseInt(readLine().trim());
 
                 switch (choice) {
 
@@ -106,9 +110,15 @@ public class Main {
                 );
 
             } catch (SQLException e) {
-                System.out.println(
-                    "Database error: " + e.getMessage()
-                );
+                if ("23505".equals(e.getSQLState())) {
+                    System.out.println(
+                        "Registration failed: that student ID or email is already registered."
+                    );
+                } else {
+                    System.out.println(
+                        "Database operation failed. No success was reported."
+                    );
+                }
 
             } catch (Exception e) {
                 System.out.println(
@@ -155,18 +165,19 @@ public class Main {
     public static void registerStudent() throws SQLException {
 
         System.out.print("Enter Student ID: ");
-        int id = Integer.parseInt(sc.nextLine().trim());
+        int id = Integer.parseInt(readLine().trim());
 
         System.out.print("Enter Name: ");
-        String name = sc.nextLine().trim();
+        String name = readLine().trim();
 
         System.out.print("Enter Email: ");
-        String email = sc.nextLine().trim();
+        String email = readLine().trim().toLowerCase(java.util.Locale.ROOT);
 
         // Basic input validation
-        if (name.isEmpty() || email.isEmpty()) {
+        if (name.isEmpty() || email.isEmpty()
+                || !email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
             System.out.println(
-                "Name and email cannot be empty."
+                "Enter a name and a valid email address."
             );
             return;
         }
@@ -187,49 +198,77 @@ public class Main {
             return;
         }
 
-        Student student = new Student(id, name, email);
-
         try {
-            // Save to PostgreSQL first
-            studentDAO.addStudent(student);
-
-            // Add to the application's in-memory system only after
-            // the database insert succeeds
-            system.registerStudent(student);
-
-            System.out.println(
-                "\nStudent registered successfully!"
-            );
-
-            System.out.println(
-                "Student saved to Supabase PostgreSQL."
-            );
-
-            System.out.println("Student ID: " + id);
-            System.out.println("Name: " + name);
-            System.out.println("Email: " + email);
-
+            if (studentDAO.getStudentByEmail(email) != null) {
+                System.out.println("Email address is already registered.");
+                return;
+            }
         } catch (SQLException e) {
-
             System.out.println(
-                "\nStudent registration failed."
+                "Could not check for duplicate email. Registration was not attempted."
             );
-
-            System.out.println(
-                "Database error: " + e.getMessage()
-            );
-
-            // Do not add the student to the in-memory system
-            // when the database insert fails.
             throw e;
         }
+
+        if (CONSOLE == null) {
+            System.out.println(
+                "Secure password input is unavailable in this console. "
+                + "Run the program from Windows Terminal or PowerShell, "
+                + "not an IDE output pane."
+            );
+            return;
+        }
+
+        char[] password = CONSOLE.readPassword("Enter Password: ");
+        if (password == null || password.length == 0) {
+            clearPassword(password);
+            System.out.println("Password cannot be empty.");
+            return;
+        }
+
+        char[] confirmation = CONSOLE.readPassword("Confirm Password: ");
+        if (confirmation == null || !Arrays.equals(password, confirmation)) {
+            clearPassword(password);
+            clearPassword(confirmation);
+            System.out.println("Passwords do not match.");
+            return;
+        }
+        clearPassword(confirmation);
+
+        String passwordHash;
+        try {
+            passwordHash = PasswordService.hash(password);
+        } catch (IllegalArgumentException e) {
+            System.out.println(e.getMessage());
+            return;
+        }
+
+        Student student = new Student(id, name, email);
+        studentDAO.addStudent(student, passwordHash);
+        system.registerStudent(student);
+
+        System.out.println("\nStudent registered successfully!");
+        System.out.println("Student saved to Supabase PostgreSQL.");
+        System.out.println("Student ID: " + id);
+        System.out.println("Name: " + name);
+        System.out.println("Email: " + email);
+    }
+
+    private static void clearPassword(char[] password) {
+        if (password != null) {
+            Arrays.fill(password, '\0');
+        }
+    }
+
+    private static String readLine() {
+        return CONSOLE == null ? sc.nextLine() : CONSOLE.readLine();
     }
 
     // 2 and 3. Add Offered or Wanted Skill
     public static void addSkill(boolean offered) {
 
         System.out.print("Enter Student ID: ");
-        int id = Integer.parseInt(sc.nextLine().trim());
+        int id = Integer.parseInt(readLine().trim());
 
         Student student = system.getStudent(id);
 
@@ -239,13 +278,13 @@ public class Main {
         }
 
         System.out.print("Enter Skill ID: ");
-        int skillId = Integer.parseInt(sc.nextLine().trim());
+        int skillId = Integer.parseInt(readLine().trim());
 
         System.out.print("Enter Skill Name: ");
-        String name = sc.nextLine().trim();
+        String name = readLine().trim();
 
         System.out.print("Enter Category: ");
-        String category = sc.nextLine().trim();
+        String category = readLine().trim();
 
         System.out.println("\nAvailable Levels:");
         System.out.println(
@@ -255,14 +294,14 @@ public class Main {
         System.out.print("Enter Level: ");
 
         Skill.Level level = Skill.Level.valueOf(
-            sc.nextLine().trim().toUpperCase()
+            readLine().trim().toUpperCase()
         );
 
         String goal = "";
 
         if (!offered) {
             System.out.print("Enter Learning Goal: ");
-            goal = sc.nextLine().trim();
+            goal = readLine().trim();
         }
 
         Skill skill = new Skill(
@@ -291,7 +330,7 @@ public class Main {
     public static void viewProfile() {
 
         System.out.print("Enter Student ID: ");
-        int id = Integer.parseInt(sc.nextLine().trim());
+        int id = Integer.parseInt(readLine().trim());
 
         Student student = system.getStudent(id);
 
@@ -307,7 +346,7 @@ public class Main {
     public static void searchMentors() {
 
         System.out.print("Enter Your Student ID: ");
-        int learnerId = Integer.parseInt(sc.nextLine().trim());
+        int learnerId = Integer.parseInt(readLine().trim());
 
         if (system.getStudent(learnerId) == null) {
             System.out.println("Student not found!");
@@ -315,7 +354,7 @@ public class Main {
         }
 
         System.out.print("Enter Skill to Learn: ");
-        String skillName = sc.nextLine().trim();
+        String skillName = readLine().trim();
 
         ArrayList<Match> matches =
             system.findMentors(skillName, learnerId);
@@ -336,19 +375,19 @@ public class Main {
     public static void scheduleSession() {
 
         System.out.print("Enter Mentor ID: ");
-        int mentorId = Integer.parseInt(sc.nextLine().trim());
+        int mentorId = Integer.parseInt(readLine().trim());
 
         System.out.print("Enter Learner ID: ");
-        int learnerId = Integer.parseInt(sc.nextLine().trim());
+        int learnerId = Integer.parseInt(readLine().trim());
 
         System.out.print("Enter Skill Name: ");
-        String skill = sc.nextLine().trim();
+        String skill = readLine().trim();
 
         System.out.print("Enter Date (YYYY-MM-DD): ");
-        String date = sc.nextLine().trim();
+        String date = readLine().trim();
 
         System.out.print("Enter Time (HH:MM): ");
-        String time = sc.nextLine().trim();
+        String time = readLine().trim();
 
         Session session = system.scheduleSession(
             mentorId,
@@ -370,7 +409,7 @@ public class Main {
     public static void completeSession() {
 
         System.out.print("Enter Session ID: ");
-        int id = Integer.parseInt(sc.nextLine().trim());
+        int id = Integer.parseInt(readLine().trim());
 
         system.completeSession(id);
 
@@ -381,10 +420,10 @@ public class Main {
     public static void rateMentor() {
 
         System.out.print("Enter Completed Session ID: ");
-        int id = Integer.parseInt(sc.nextLine().trim());
+        int id = Integer.parseInt(readLine().trim());
 
         System.out.print("Enter Rating (1-5): ");
-        int score = Integer.parseInt(sc.nextLine().trim());
+        int score = Integer.parseInt(readLine().trim());
 
         if (score < 1 || score > 5) {
             System.out.println(
@@ -394,7 +433,7 @@ public class Main {
         }
 
         System.out.print("Enter Feedback: ");
-        String feedback = sc.nextLine().trim();
+        String feedback = readLine().trim();
 
         Rating rating = system.rateMentor(
             id,
