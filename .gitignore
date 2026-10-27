@@ -1,0 +1,10 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Compiled Java files
+*.class
+out/
+
+# Local configuration files

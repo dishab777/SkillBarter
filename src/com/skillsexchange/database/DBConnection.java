@@ -6,11 +6,38 @@ import java.sql.SQLException;
 
 public class DBConnection {
 
-    private static final String URL = "jdbc:mysql://localhost:3306/peer_skill_exchange";
-    private static final String USER = "root";
-    private static final String PASSWORD = "mukti012";
+    private static final String HOST =
+            System.getenv("SUPABASE_DB_HOST");
+
+    private static final String PORT =
+            System.getenv("SUPABASE_DB_PORT");
+
+    private static final String DATABASE =
+            System.getenv("SUPABASE_DB_NAME");
+
+    private static final String USER =
+            System.getenv("SUPABASE_DB_USER");
+
+    private static final String PASSWORD =
+            System.getenv("SUPABASE_DB_PASSWORD");
 
     public static Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(URL, USER, PASSWORD);
+
+        if (HOST == null || HOST.trim().isEmpty()
+                || PORT == null || PORT.trim().isEmpty()
+                || DATABASE == null || DATABASE.trim().isEmpty()
+                || USER == null || USER.trim().isEmpty()
+                || PASSWORD == null || PASSWORD.isEmpty()) {
+
+            throw new SQLException(
+                    "Database configuration is missing. "
+                    + "Set the SUPABASE_DB_* environment variables."
+            );
+        }
+
+        String url = "jdbc:postgresql://" + HOST + ":"
+                + PORT + "/" + DATABASE + "?sslmode=require";
+
+        return DriverManager.getConnection(url, USER, PASSWORD);
     }
 }
