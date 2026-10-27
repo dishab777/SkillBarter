@@ -65,9 +65,7 @@ h1, h2, h3 { color: var(--ink); }
 .nav-link:hover, .nav-link--active { color: var(--ink); }
 .nav-link--active::after { position: absolute; bottom: -1px; left: 0; width: 100%; height: 2px; content: ""; background: #d48869; }
 .header-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
-.demo-mode-badge { padding: 5px 9px; border: 1px solid var(--line); border-radius: 16px; color: #55745c; background: var(--green-light); font-size: 9px; font-weight: 700; }
-.student-switch { display: inline-flex; align-items: center; gap: 8px; padding: 4px; border: 1px solid var(--line); border-radius: 30px; background: var(--paper); }
-.student-switch select { max-width: 116px; padding: 4px 2px 4px 9px; border: 0; color: var(--ink); background: transparent; font-size: 12px; font-weight: 600; cursor: pointer; }
+.header-user { max-width: 180px; overflow: hidden; color: var(--muted); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .icon-button { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; transition: color 0.2s, background 0.2s, transform 0.2s; }
 .icon-button:hover { color: var(--ink); background: var(--paper); transform: translateY(-1px); }
 .header-profile { display: inline-flex; gap: 5px; align-items: center; padding: 10px 16px; border-radius: 24px; background: #174b45; color: #fffefa; font-size: 12px; font-weight: 600; transition: transform 0.2s, background 0.2s; }
@@ -89,6 +87,8 @@ h1, h2, h3 { color: var(--ink); }
 .button--outline:hover { border-color: #74988a; background: var(--green-light); }
 .button--full { width: 100%; }
 .button--small { min-height: 38px; padding: 0 14px; border-radius: 5px 12px 5px 12px; font-size: 12px; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .text-link { display: inline-flex; gap: 7px; align-items: center; color: #347167; font-size: 13px; font-weight: 700; }
 .text-link:hover { color: #bb7258; }
 .back-link { display: inline-flex; gap: 8px; align-items: center; margin-bottom: 30px; color: var(--muted); font-size: 13px; }
@@ -387,8 +387,7 @@ h1, h2, h3 { color: var(--ink); }
   .student-switch { padding: 3px; }
   .student-switch select { max-width: 95px; font-size: 10px; }
   .theme-toggle { width: 33px; height: 33px; }
-  .reset-button, .header-profile { display: none; }
-  .demo-mode-badge { display: none; }
+  .header-profile, .header-user { display: none; }
   .mobile-nav-toggle { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: transparent; font-size: 17px; cursor: pointer; }
   .mobile-nav { position: absolute; top: 67px; right: 4vw; left: 4vw; z-index: 12; display: none; flex-direction: column; padding: 10px; border: 1px solid var(--line); border-radius: 5px 16px 5px 16px; background: var(--paper); box-shadow: var(--shadow); }
   .site-header.mobile-menu-open .mobile-nav { display: flex; }

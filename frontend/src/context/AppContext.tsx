@@ -7,20 +7,18 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { activeStudentStorageKey, api } from "../api/client";
-import type { Rating, Session, Student } from "../types/models";
+import { ApiError, api } from "../api/client";
+import type { Student } from "../types/models";
 
 interface AppContextValue {
   students: Student[];
-  sessions: Session[];
-  ratings: Rating[];
-  activeStudentId: number;
-  activeStudent: Student | undefined;
+  activeStudent: Student | null;
   loading: boolean;
   error: string;
-  setActiveStudentId: (studentId: number) => void;
   refresh: () => Promise<void>;
   perform: (action: () => Promise<unknown>) => Promise<boolean>;
+  setAuthenticatedUser: (student: Student) => void;
+  logout: () => Promise<boolean>;
   clearError: () => void;
 }
 
@@ -28,30 +26,31 @@ const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [students, setStudents] = useState<Student[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [ratings, setRatings] = useState<Rating[]>([]);
-  const [activeStudentId, setActiveStudentIdState] = useState(() => {
-    const saved = window.localStorage.getItem(activeStudentStorageKey);
-    const parsed = saved ? Number(saved) : 1;
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
-  });
+  const [activeStudent, setActiveStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextStudents, nextSessions, nextRatings] = await Promise.all([
-        api.getStudents(),
-        api.getSessions(),
-        api.getRatings(),
-      ]);
-      setStudents(nextStudents);
-      setSessions(nextSessions);
-      setRatings(nextRatings);
+      const currentUser = await api.getCurrentUser();
+      const allStudents = await api.getStudents();
+      setActiveStudent(currentUser);
+      setStudents(allStudents);
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load SkillBarter data.");
+      setStudents([]);
+      if (cause instanceof ApiError && cause.status === 401) {
+        setActiveStudent(null);
+        setError("");
+      } else {
+        setActiveStudent(null);
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Unable to connect to the SkillBarter API.",
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -61,11 +60,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  const setActiveStudentId = useCallback((studentId: number) => {
-    setActiveStudentIdState(studentId);
-    window.localStorage.setItem(activeStudentStorageKey, String(studentId));
-  }, []);
-
   const perform = useCallback(
     async (action: () => Promise<unknown>) => {
       try {
@@ -73,36 +67,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await refresh();
         return true;
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "That action could not be completed.");
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "That action could not be completed.",
+        );
+        if (cause instanceof ApiError && cause.status === 401) {
+          setActiveStudent(null);
+          setStudents([]);
+        }
         return false;
       }
     },
     [refresh],
   );
 
+  const setAuthenticatedUser = useCallback((student: Student) => {
+    setActiveStudent(student);
+    setError("");
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await api.logout();
+      setActiveStudent(null);
+      setStudents([]);
+      setError("");
+      return true;
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Unable to sign out.",
+      );
+      return false;
+    }
+  }, []);
+
   const value = useMemo(
     () => ({
       students,
-      sessions,
-      ratings,
-      activeStudentId,
-      activeStudent: students.find((student) => student.userId === activeStudentId),
+      activeStudent,
       loading,
       error,
-      setActiveStudentId,
       refresh,
       perform,
+      setAuthenticatedUser,
+      logout,
       clearError: () => setError(""),
     }),
     [
-      activeStudentId,
+      activeStudent,
       error,
       loading,
+      logout,
       perform,
-      ratings,
       refresh,
-      sessions,
-      setActiveStudentId,
+      setAuthenticatedUser,
       students,
     ],
   );
@@ -112,6 +131,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
 export function useApp() {
   const context = useContext(AppContext);
-  if (!context) throw new Error("useApp must be used inside AppProvider.");
+  if (!context) {
+    throw new Error("useApp must be used inside AppProvider.");
+  }
   return context;
 }

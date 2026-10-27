@@ -5,14 +5,11 @@ import com.google.gson.JsonParseException;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-
 import com.skillsexchange.database.DBConnection;
-import com.skillsexchange.database.StudentDAO;
-import com.skillsexchange.model.Rating;
-import com.skillsexchange.model.Session;
+import com.skillsexchange.database.UserDAO;
 import com.skillsexchange.model.Skill;
 import com.skillsexchange.model.Student;
-import com.skillsexchange.service.SkillExchangeSystem;
+import com.skillsexchange.service.AuthService;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,49 +21,72 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 public class ApiServer {
 
     private static final int DEFAULT_PORT = 8080;
-    private static final Gson gson = new Gson();
-    private static final StudentDAO studentDAO = new StudentDAO();
-    private static final SkillExchangeSystem system = new SkillExchangeSystem();
-
-    static {
-        loadStudentsFromDatabase();
-    }
+    private static final int SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
+    private static final String SESSION_COOKIE = "SKILLBARTER_SESSION";
+    private static final String ALLOWED_ORIGIN = configuredOrigin();
+    private static final Gson GSON = new Gson();
+    private static final UserDAO USER_DAO = new UserDAO();
+    private static final AuthService AUTH_SERVICE = new AuthService(USER_DAO);
 
     public static void main(String[] args) throws IOException {
-        int port = DEFAULT_PORT;
-
-        if (args != null && args.length > 0) {
-            try {
-                port = Integer.parseInt(args[0]);
-            } catch (NumberFormatException e) {
-                System.err.println("Invalid port supplied. Falling back to 8080.");
-            }
-        }
-
+        int port = configuredPort(args);
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/api", ApiServer::handleApi);
         server.setExecutor(null);
         server.start();
 
-        System.out.println("==================================");
-        System.out.println("SkillBarter API server is running");
-        System.out.println("API base: http://localhost:" + port + "/api");
+        System.out.println("SkillBarter API listening on http://localhost:" + port);
+        System.out.println("Allowed frontend origin: " + ALLOWED_ORIGIN);
         System.out.println("Press Ctrl+C to stop the server.");
-        System.out.println("==================================");
+    }
+
+    private static int configuredPort(String[] args) {
+        String configured = args != null && args.length > 0
+                ? args[0]
+                : System.getenv("API_PORT");
+        if (configured == null || configured.trim().isEmpty()) {
+            return DEFAULT_PORT;
+        }
+
+        try {
+            int port = Integer.parseInt(configured.trim());
+            if (port < 1 || port > 65535) {
+                throw new NumberFormatException();
+            }
+            return port;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("API port must be between 1 and 65535.");
+        }
+    }
+
+    private static String configuredOrigin() {
+        String origin = System.getenv("CORS_ALLOWED_ORIGIN");
+        return origin == null || origin.trim().isEmpty()
+                ? "http://localhost:5173"
+                : origin.trim();
     }
 
     private static void handleApi(HttpExchange exchange) throws IOException {
         addCorsHeaders(exchange);
+        String origin = exchange.getRequestHeaders().getFirst("Origin");
+        if (origin != null && !ALLOWED_ORIGIN.equals(origin)) {
+            sendError(exchange, 403, "This frontend origin is not allowed.");
+            return;
+        }
 
         String method = exchange.getRequestMethod();
         String path = exchange.getRequestURI().getPath();
-
         if ("OPTIONS".equalsIgnoreCase(method)) {
+            if (origin != null && !ALLOWED_ORIGIN.equals(origin)) {
+                sendError(exchange, 403, "This frontend origin is not allowed.");
+                return;
+            }
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
             return;
@@ -75,514 +95,389 @@ public class ApiServer {
         try {
             if ("/api/health".equals(path)) {
                 handleHealth(exchange, method);
-            } else if ("/api/students".equals(path)) {
+                return;
+            }
+
+            if (path != null && path.startsWith("/api/auth/")) {
+                handleAuth(exchange, method, path);
+                return;
+            }
+
+            Student currentUser = authenticatedUser(exchange);
+            if (currentUser == null) {
+                sendError(exchange, 401, "Authentication is required.");
+                return;
+            }
+
+            if ("/api/students".equals(path)) {
                 handleStudents(exchange, method);
             } else if (path != null && path.startsWith("/api/students/")) {
-                handleStudentDetail(exchange, method, path);
+                handleStudentDetail(exchange, method, path, currentUser);
             } else if ("/api/mentors".equals(path)) {
-                handleMentors(exchange, method);
-            } else if ("/api/sessions".equals(path)) {
-                handleSessions(exchange, method);
-            } else if (path != null && path.startsWith("/api/sessions/")) {
-                handleSessionDetail(exchange, method, path);
+                handleMentors(exchange, method, currentUser);
+            } else if ("/api/sessions".equals(path) || path.startsWith("/api/sessions/")) {
+                sendError(exchange, 501,
+                        "Session scheduling is not persisted by the current database schema.");
             } else if ("/api/ratings".equals(path)) {
-                handleRatings(exchange, method);
+                sendError(exchange, 501,
+                        "Ratings are not persisted by the current database schema.");
             } else {
                 sendError(exchange, 404, "Endpoint not found.");
             }
+        } catch (AuthService.InvalidCredentialsException e) {
+            sendError(exchange, 401, "Invalid email or password.");
         } catch (IllegalArgumentException e) {
             sendError(exchange, 400, e.getMessage());
-        } catch (IllegalStateException e) {
-            sendError(exchange, 409, e.getMessage());
         } catch (SQLException e) {
             e.printStackTrace();
-            sendError(exchange, 500, "Database error while processing the request.");
+            if ("23505".equals(e.getSQLState())) {
+                sendError(exchange, 409, "That student ID or email address is already registered.");
+            } else {
+                sendError(exchange, 500, "The database could not complete the request.");
+            }
         } catch (Exception e) {
             e.printStackTrace();
             sendError(exchange, 500, "The server could not complete the request.");
         }
     }
 
-    private static void handleHealth(HttpExchange exchange, String method) throws IOException {
+    private static void handleHealth(HttpExchange exchange, String method)
+            throws IOException {
         if (!"GET".equalsIgnoreCase(method)) {
             sendError(exchange, 405, "GET is the only supported method for /api/health.");
             return;
         }
 
-        sendJson(exchange, 200, successResponse("SkillBarter API is running.", Map.of("status", "ok")));
+        try {
+            USER_DAO.checkConnection();
+            sendJson(exchange, 200, success("API and Supabase PostgreSQL are reachable.",
+                    Map.of("status", "ok", "database", "connected")));
+        } catch (SQLException e) {
+            e.printStackTrace();
+            sendError(exchange, 503, "The API is running, but the database is unavailable.");
+        }
+    }
+
+    private static void handleAuth(HttpExchange exchange, String method, String path)
+            throws IOException, SQLException {
+        if ("/api/auth/register".equals(path)) {
+            if (!"POST".equalsIgnoreCase(method)) {
+                sendError(exchange, 405, "POST is required for registration.");
+                return;
+            }
+
+            RegisterRequest request = readJson(exchange, RegisterRequest.class);
+            if (request == null) {
+                sendError(exchange, 400, "Registration details are required.");
+                return;
+            }
+
+            Student student = AUTH_SERVICE.register(
+                    request.studentId,
+                    request.name,
+                    request.email,
+                    request.password
+            );
+            sendJson(exchange, 201,
+                    success("Account registered successfully. Please sign in.",
+                            studentToMap(student)));
+            return;
+        }
+
+        if ("/api/auth/login".equals(path)) {
+            if (!"POST".equalsIgnoreCase(method)) {
+                sendError(exchange, 405, "POST is required for login.");
+                return;
+            }
+
+            LoginRequest request = readJson(exchange, LoginRequest.class);
+            if (request == null) {
+                throw new AuthService.InvalidCredentialsException();
+            }
+
+            AuthService.LoginResult result =
+                    AUTH_SERVICE.login(request.email, request.password);
+            exchange.getResponseHeaders().add(
+                    "Set-Cookie",
+                    sessionCookie(result.getToken(), SESSION_MAX_AGE_SECONDS)
+            );
+            sendJson(exchange, 200,
+                    success("Signed in successfully.", studentToMap(result.getStudent())));
+            return;
+        }
+
+        if ("/api/auth/me".equals(path)) {
+            if (!"GET".equalsIgnoreCase(method)) {
+                sendError(exchange, 405, "GET is required for the current-user endpoint.");
+                return;
+            }
+
+            Student student = authenticatedUser(exchange);
+            if (student == null) {
+                clearSessionCookie(exchange);
+                sendError(exchange, 401, "Authentication is required.");
+                return;
+            }
+
+            Student profile = USER_DAO.findStudentById(student.getUserId());
+            if (profile == null) {
+                AUTH_SERVICE.logout(sessionToken(exchange));
+                clearSessionCookie(exchange);
+                sendError(exchange, 401, "Authentication is required.");
+                return;
+            }
+            sendJson(exchange, 200, success("Current user retrieved.", studentToMap(profile)));
+            return;
+        }
+
+        if ("/api/auth/logout".equals(path)) {
+            if (!"POST".equalsIgnoreCase(method)) {
+                sendError(exchange, 405, "POST is required for logout.");
+                return;
+            }
+
+            AUTH_SERVICE.logout(sessionToken(exchange));
+            clearSessionCookie(exchange);
+            sendJson(exchange, 200, success("Signed out successfully.", Map.of()));
+            return;
+        }
+
+        sendError(exchange, 404, "Authentication endpoint not found.");
     }
 
     private static void handleStudents(HttpExchange exchange, String method)
             throws IOException, SQLException {
+        if (!"GET".equalsIgnoreCase(method)) {
+            sendError(exchange, 405, "GET is the only supported method for /api/students.");
+            return;
+        }
 
-        if ("GET".equalsIgnoreCase(method)) {
-            String query = exchange.getRequestURI().getRawQuery();
-
-            if (query != null && !query.isEmpty()) {
-                Map<String, String> params = parseQuery(query);
-                if (params.containsKey("id")) {
-                    int studentId = parsePositiveInt(params.get("id"), "Student ID");
-                    Student student = system.getStudent(studentId);
-                    if (student == null) {
-                        sendError(exchange, 404, "Student not found.");
-                        return;
-                    }
-
-                    sendJson(exchange, 200, successResponse("Student retrieved successfully.", studentToMap(student)));
+        String query = exchange.getRequestURI().getRawQuery();
+        if (query != null) {
+            Map<String, String> parameters = parseQuery(query);
+            if (parameters.containsKey("id")) {
+                int id = parsePositiveInt(parameters.get("id"), "Student ID");
+                Student student = USER_DAO.findStudentById(id);
+                if (student == null) {
+                    sendError(exchange, 404, "Student not found.");
                     return;
                 }
+                sendJson(exchange, 200, success("Student retrieved.", studentToMap(student)));
+                return;
             }
-
-            List<Map<String, Object>> students = new ArrayList<>();
-            for (Student student : system.getAllStudents()) {
-                students.add(studentToMap(student));
-            }
-            sendJson(exchange, 200, successResponse("Students retrieved successfully.", students));
-            return;
         }
 
-        if ("POST".equalsIgnoreCase(method)) {
-            StudentRequest request = readJsonBody(exchange, StudentRequest.class);
-            if (request == null) {
-                sendError(exchange, 400, "Request body is required.");
-                return;
-            }
-
-            if (request.studentId == null || request.studentId <= 0) {
-                sendError(exchange, 400, "Student ID is required.");
-                return;
-            }
-
-            if (request.name == null || request.name.trim().isEmpty()) {
-                sendError(exchange, 400, "Student name is required.");
-                return;
-            }
-
-            if (request.email == null || request.email.trim().isEmpty()) {
-                sendError(exchange, 400, "Student email is required.");
-                return;
-            }
-
-            String name = request.name.trim();
-            String email = request.email.trim();
-
-            if (!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
-                sendError(exchange, 400, "Enter a valid email address.");
-                return;
-            }
-
-            if (system.getStudent(request.studentId) != null) {
-                sendError(exchange, 409, "A student with this ID already exists.");
-                return;
-            }
-
-            Student student = new Student(request.studentId, name, email);
-
-            if (DBConnection.isConfigured()) {
-                try {
-                    studentDAO.addStudent(student);
-                } catch (SQLException sqlException) {
-                    if ("23505".equals(sqlException.getSQLState())) {
-                        sendError(exchange, 409, "A student with this ID or email already exists.");
-                        return;
-                    }
-                    throw sqlException;
-                }
-            }
-
-            system.registerStudent(student);
-            sendJson(exchange, 201, successResponse("Student registered successfully.", studentToMap(student)));
-            return;
+        List<Map<String, Object>> students = new ArrayList<>();
+        for (Student student : USER_DAO.findAllStudents()) {
+            students.add(studentToMap(student));
         }
-
-        sendError(exchange, 405, "Supported methods for /api/students are GET and POST.");
+        sendJson(exchange, 200, success("Students retrieved.", students));
     }
 
-    private static void handleStudentDetail(HttpExchange exchange, String method, String path)
-            throws IOException, SQLException {
-
-        String studentIdText = path.substring("/api/students/".length()).trim();
-        if (studentIdText.isEmpty()) {
-            sendError(exchange, 404, "Student path is missing an ID.");
+    private static void handleStudentDetail(
+            HttpExchange exchange,
+            String method,
+            String path,
+            Student currentUser) throws IOException, SQLException {
+        String studentPath = path.substring("/api/students/".length());
+        if (studentPath.endsWith("/skills")) {
+            handleAddSkill(exchange, method, studentPath, currentUser);
             return;
         }
 
-        if (studentIdText.contains("/skills")) {
-            handleStudentSkill(exchange, method, studentIdText);
+        int userId = parsePositiveInt(studentPath, "Student ID");
+        if (userId != currentUser.getUserId()) {
+            sendError(exchange, 403, "You can only change your own profile.");
+            return;
+        }
+        if (!"PUT".equalsIgnoreCase(method)) {
+            sendError(exchange, 405, "PUT is required to update a student profile.");
             return;
         }
 
-        int studentId = parsePositiveInt(studentIdText, "Student ID");
-        Student student = system.getStudent(studentId);
-
-        if (student == null) {
-            sendError(exchange, 404, "Student not found.");
+        ProfileRequest request = readJson(exchange, ProfileRequest.class);
+        if (request == null || request.name == null || request.name.trim().isEmpty()) {
+            sendError(exchange, 400, "Full name is required.");
+            return;
+        }
+        String email = request.email == null
+                ? ""
+                : request.email.trim().toLowerCase(Locale.ROOT);
+        if (!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
+            sendError(exchange, 400, "Enter a valid email address.");
             return;
         }
 
-        if ("PUT".equalsIgnoreCase(method)) {
-            StudentUpdateRequest request = readJsonBody(exchange, StudentUpdateRequest.class);
-            if (request == null) {
-                sendError(exchange, 400, "Request body is required.");
-                return;
-            }
-
-            if (request.name == null || request.name.trim().isEmpty()) {
-                sendError(exchange, 400, "Student name is required.");
-                return;
-            }
-
-            if (request.email == null || request.email.trim().isEmpty()) {
-                sendError(exchange, 400, "Student email is required.");
-                return;
-            }
-
-            String trimmedName = request.name.trim();
-            String trimmedEmail = request.email.trim();
-
-            if (!trimmedEmail.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
-                sendError(exchange, 400, "Enter a valid email address.");
-                return;
-            }
-
-            system.updateStudent(studentId, trimmedName, trimmedEmail);
-            if (DBConnection.isConfigured()) {
-                studentDAO.updateStudent(studentId, trimmedName, trimmedEmail);
-            }
-            Student updated = system.getStudent(studentId);
-            sendJson(exchange, 200, successResponse("Student updated successfully.", studentToMap(updated)));
-            return;
-        }
-
-        sendError(exchange, 405, "Supported methods for /api/students/{id} are PUT.");
+        USER_DAO.updateProfile(userId, request.name.trim(), email);
+        sendJson(exchange, 200, success("Profile updated.",
+                studentToMap(USER_DAO.findStudentById(userId))));
     }
 
-    private static void handleStudentSkill(HttpExchange exchange, String method, String studentPath)
-            throws IOException, SQLException {
-
-        String studentIdText = studentPath.substring(0, studentPath.indexOf("/skills"));
-        int studentId = parsePositiveInt(studentIdText, "Student ID");
-        Student student = system.getStudent(studentId);
-
-        if (student == null) {
-            sendError(exchange, 404, "Student not found.");
+    private static void handleAddSkill(
+            HttpExchange exchange,
+            String method,
+            String studentPath,
+            Student currentUser) throws IOException, SQLException {
+        String id = studentPath.substring(0, studentPath.length() - "/skills".length());
+        int userId = parsePositiveInt(id, "Student ID");
+        if (userId != currentUser.getUserId()) {
+            sendError(exchange, 403, "You can only add skills to your own profile.");
             return;
         }
-
         if (!"POST".equalsIgnoreCase(method)) {
-            sendError(exchange, 405, "POST is required for /api/students/{id}/skills.");
+            sendError(exchange, 405, "POST is required to add a skill.");
             return;
         }
 
-        StudentSkillRequest request = readJsonBody(exchange, StudentSkillRequest.class);
-        if (request == null) {
-            sendError(exchange, 400, "Request body is required.");
+        SkillRequest request = readJson(exchange, SkillRequest.class);
+        if (request == null || request.offered == null) {
+            sendError(exchange, 400, "Choose whether you can teach or want to learn this skill.");
             return;
         }
-
-        if (request.skillName == null || request.skillName.trim().isEmpty()) {
+        if (request.skillName == null
+                || request.skillName.trim().isEmpty()) {
             sendError(exchange, 400, "Skill name is required.");
             return;
         }
 
-        if (request.category == null || request.category.trim().isEmpty()) {
-            sendError(exchange, 400, "Skill category is required.");
+        String skillName = request.skillName.trim();
+        if (skillName.length() > 100) {
+            sendError(exchange, 400, "Skill name must be 100 characters or fewer.");
             return;
         }
 
-        Skill.Level level = parseSkillLevel(request.level);
-        String skillName = request.skillName.trim();
-        String category = request.category.trim();
-        String learningGoal = request.learningGoal == null ? "" : request.learningGoal.trim();
-
-        int nextSkillId = 1;
-        for (Skill offered : student.getOfferedSkills()) {
-            nextSkillId = Math.max(nextSkillId, offered.getSkillId() + 1);
-        }
-        for (Skill wanted : student.getWantedSkills()) {
-            nextSkillId = Math.max(nextSkillId, wanted.getSkillId() + 1);
-        }
-
-        Skill skill = new Skill(nextSkillId, skillName, category, level, learningGoal);
-        system.addSkillToStudent(studentId, skill, request.offered != null && request.offered);
-        sendJson(exchange, 201, successResponse("Skill added successfully.", studentToMap(student)));
+        USER_DAO.addSkill(
+                userId,
+                skillName,
+                request.offered
+        );
+        Student updated = USER_DAO.findStudentById(userId);
+        sendJson(exchange, 201, success("Skill saved.", studentToMap(updated)));
     }
 
-    private static void handleMentors(HttpExchange exchange, String method) throws IOException {
+    private static void handleMentors(
+            HttpExchange exchange,
+            String method,
+            Student currentUser) throws IOException, SQLException {
         if (!"GET".equalsIgnoreCase(method)) {
             sendError(exchange, 405, "GET is the only supported method for /api/mentors.");
             return;
         }
 
         String query = exchange.getRequestURI().getRawQuery();
-        Map<String, String> params = query == null ? new LinkedHashMap<>() : parseQuery(query);
-        String skillName = params.get("skillName");
-        String learnerIdText = params.get("learnerId");
-
+        Map<String, String> parameters =
+                query == null ? new LinkedHashMap<>() : parseQuery(query);
+        String skillName = parameters.get("skillName");
         if (skillName == null || skillName.trim().isEmpty()) {
             sendError(exchange, 400, "skillName is required.");
             return;
         }
 
-        if (learnerIdText == null || learnerIdText.trim().isEmpty()) {
-            sendError(exchange, 400, "learnerId is required.");
-            return;
-        }
-
-        int learnerId = parsePositiveInt(learnerIdText, "learnerId");
         List<Map<String, Object>> matches = new ArrayList<>();
-        for (var match : system.findMentors(skillName.trim(), learnerId)) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("mentor", studentToMap(match.getMentor()));
-            entry.put("skill", skillToMap(match.getSkill()));
-            entry.put("matchScore", match.getMatchScore());
-            matches.add(entry);
-        }
-
-        sendJson(exchange, 200, successResponse("Mentor matches retrieved successfully.", matches));
-    }
-
-    private static void handleSessions(HttpExchange exchange, String method) throws IOException {
-        if ("GET".equalsIgnoreCase(method)) {
-            List<Map<String, Object>> sessions = new ArrayList<>();
-            for (Session session : system.getAllSessions()) {
-                sessions.add(sessionToMap(session));
-            }
-            sendJson(exchange, 200, successResponse("Sessions retrieved successfully.", sessions));
-            return;
-        }
-
-        if ("POST".equalsIgnoreCase(method)) {
-            SessionRequest request = readJsonBody(exchange, SessionRequest.class);
-            if (request == null) {
-                sendError(exchange, 400, "Request body is required.");
-                return;
-            }
-
-            if (request.mentorId == null || request.learnerId == null) {
-                sendError(exchange, 400, "mentorId and learnerId are required.");
-                return;
-            }
-
-            if (request.skillName == null || request.skillName.trim().isEmpty()) {
-                sendError(exchange, 400, "Skill name is required.");
-                return;
-            }
-
-            if (request.date == null || request.date.trim().isEmpty()) {
-                sendError(exchange, 400, "Session date is required.");
-                return;
-            }
-
-            if (request.time == null || request.time.trim().isEmpty()) {
-                sendError(exchange, 400, "Session time is required.");
-                return;
-            }
-
-            Session session = system.scheduleSession(
-                    request.mentorId,
-                    request.learnerId,
-                    request.skillName.trim(),
-                    request.date.trim(),
-                    request.time.trim()
-            );
-            sendJson(exchange, 201, successResponse("Session scheduled successfully.", sessionToMap(session)));
-            return;
-        }
-
-        sendError(exchange, 405, "Supported methods for /api/sessions are GET and POST.");
-    }
-
-    private static void handleSessionDetail(HttpExchange exchange, String method, String path)
-            throws IOException {
-
-        String sessionIdText = path.substring("/api/sessions/".length()).trim();
-        if (sessionIdText.isEmpty()) {
-            sendError(exchange, 404, "Session path is missing an ID.");
-            return;
-        }
-
-        if (sessionIdText.contains("/complete")) {
-            handleCompleteSession(exchange, method, sessionIdText);
-            return;
-        }
-
-        if (sessionIdText.contains("/ratings")) {
-            handleSessionRating(exchange, method, sessionIdText);
-            return;
-        }
-
-        sendError(exchange, 404, "Unsupported session route.");
-    }
-
-    private static void handleCompleteSession(HttpExchange exchange, String method, String sessionPath)
-            throws IOException {
-
-        String sessionIdText = sessionPath.substring(0, sessionPath.indexOf("/complete"));
-        int sessionId = parsePositiveInt(sessionIdText, "Session ID");
-
-        if (!"PUT".equalsIgnoreCase(method)) {
-            sendError(exchange, 405, "PUT is required for /api/sessions/{id}/complete.");
-            return;
-        }
-
-        Session session = system.getSession(sessionId);
-        if (session == null) {
-            sendError(exchange, 404, "Session not found.");
-            return;
-        }
-
-        system.completeSession(sessionId);
-        sendJson(exchange, 200, successResponse("Session marked complete.", sessionToMap(system.getSession(sessionId))));
-    }
-
-    private static void handleSessionRating(HttpExchange exchange, String method, String sessionPath)
-            throws IOException {
-
-        String sessionIdText = sessionPath.substring(0, sessionPath.indexOf("/ratings"));
-        int sessionId = parsePositiveInt(sessionIdText, "Session ID");
-
-        if (!"POST".equalsIgnoreCase(method)) {
-            sendError(exchange, 405, "POST is required for /api/sessions/{id}/ratings.");
-            return;
-        }
-
-        RatingRequest request = readJsonBody(exchange, RatingRequest.class);
-        if (request == null) {
-            sendError(exchange, 400, "Request body is required.");
-            return;
-        }
-
-        if (request.score == null || request.score < 1 || request.score > 5) {
-            sendError(exchange, 400, "Rating must be between 1 and 5.");
-            return;
-        }
-
-        String feedback = request.feedback == null ? "" : request.feedback.trim();
-        Rating rating = system.rateMentor(sessionId, request.score, feedback);
-        sendJson(exchange, 201, successResponse("Rating added successfully.", ratingToMap(rating)));
-    }
-
-    private static void handleRatings(HttpExchange exchange, String method) throws IOException {
-        if (!"GET".equalsIgnoreCase(method)) {
-            sendError(exchange, 405, "GET is the only supported method for /api/ratings.");
-            return;
-        }
-
-        List<Map<String, Object>> ratings = new ArrayList<>();
-        for (Rating rating : system.getAllRatings()) {
-            ratings.add(ratingToMap(rating));
-        }
-        sendJson(exchange, 200, successResponse("Ratings retrieved successfully.", ratings));
-    }
-
-    private static Map<String, Object> successResponse(String message, Object data) {
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("success", true);
-        response.put("message", message);
-        response.put("data", data);
-        return response;
-    }
-
-    private static Map<String, Object> studentToMap(Student student) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("userId", student.getUserId());
-        result.put("name", student.getName());
-        result.put("email", student.getEmail());
-        result.put("offeredSkills", skillsToMap(student.getOfferedSkills()));
-        result.put("wantedSkills", skillsToMap(student.getWantedSkills()));
-        result.put("ratings", ratingsToMap(student.getRatings()));
-        return result;
-    }
-
-    private static List<Map<String, Object>> skillsToMap(List<Skill> skills) {
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (Skill skill : skills) {
-            result.add(skillToMap(skill));
-        }
-        return result;
-    }
-
-    private static Map<String, Object> skillToMap(Skill skill) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("skillId", skill.getSkillId());
-        result.put("skillName", skill.getSkillName());
-        result.put("category", skill.getCategory());
-        result.put("level", skill.getLevel() == null ? "NONE" : skill.getLevel().name());
-        result.put("learningGoal", skill.getLearningGoal());
-        return result;
-    }
-
-    private static List<Map<String, Object>> ratingsToMap(List<Rating> ratings) {
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (Rating rating : ratings) {
-            result.add(ratingToMap(rating));
-        }
-        return result;
-    }
-
-    private static Map<String, Object> ratingToMap(Rating rating) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("ratingId", rating.getRatingId());
-        result.put("fromStudent", studentSummary(rating.getFromStudent()));
-        result.put("toStudent", studentSummary(rating.getToStudent()));
-        result.put("score", rating.getScore());
-        result.put("feedback", rating.getFeedback());
-        return result;
-    }
-
-    private static Map<String, Object> studentSummary(Student student) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("userId", student.getUserId());
-        result.put("name", student.getName());
-        result.put("email", student.getEmail());
-        return result;
-    }
-
-    private static Map<String, Object> sessionToMap(Session session) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("sessionId", session.getSessionId());
-        result.put("mentor", studentToMap(session.getMentor()));
-        result.put("learner", studentToMap(session.getLearner()));
-        result.put("skill", skillToMap(session.getSkill()));
-        result.put("date", session.getDate());
-        result.put("time", session.getTime());
-        result.put("status", session.getStatus().name());
-        return result;
-    }
-
-    private static Map<String, String> parseQuery(String query) {
-        Map<String, String> params = new LinkedHashMap<>();
-        for (String pair : query.split("&")) {
-            if (pair == null || pair.isEmpty()) {
+        for (Student student : USER_DAO.findAllStudents()) {
+            if (student.getUserId() == currentUser.getUserId()) {
                 continue;
             }
-
-            String[] parts = pair.split("=", 2);
-            String key = URLDecoder.decode(parts[0], StandardCharsets.UTF_8);
-            String value = parts.length > 1 ? URLDecoder.decode(parts[1], StandardCharsets.UTF_8) : "";
-            params.put(key, value);
+            for (Skill skill : student.getOfferedSkills()) {
+                if (skill.getSkillName().equalsIgnoreCase(skillName.trim())) {
+                    Map<String, Object> match = new LinkedHashMap<>();
+                    match.put("mentor", studentToMap(student));
+                    match.put("skill", skillToMap(skill));
+                    matches.add(match);
+                }
+            }
         }
-        return params;
+        sendJson(exchange, 200, success("Mentor matches retrieved.", matches));
     }
 
-    private static <T> T readJsonBody(HttpExchange exchange, Class<T> type) throws IOException {
+    private static Student authenticatedUser(HttpExchange exchange) {
+        return AUTH_SERVICE.findSession(sessionToken(exchange));
+    }
+
+    private static String sessionToken(HttpExchange exchange) {
+        List<String> cookieHeaders = exchange.getRequestHeaders().get("Cookie");
+        if (cookieHeaders == null) {
+            return null;
+        }
+
+        for (String cookieHeader : cookieHeaders) {
+            for (String cookie : cookieHeader.split(";")) {
+                String[] parts = cookie.trim().split("=", 2);
+                if (parts.length == 2 && SESSION_COOKIE.equals(parts[0])) {
+                    return parts[1];
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String sessionCookie(String token, int maxAge) {
+        String cookie = SESSION_COOKIE + "=" + token
+                + "; HttpOnly; SameSite=Lax; Path=/; Max-Age=" + maxAge;
+        if (Boolean.parseBoolean(System.getenv("APP_COOKIE_SECURE"))) {
+            cookie += "; Secure";
+        }
+        return cookie;
+    }
+
+    private static void clearSessionCookie(HttpExchange exchange) {
+        exchange.getResponseHeaders().add(
+                "Set-Cookie",
+                sessionCookie("", 0)
+        );
+    }
+
+    private static void addCorsHeaders(HttpExchange exchange) {
+        Headers headers = exchange.getResponseHeaders();
+        headers.set("Vary", "Origin");
+        headers.set("Cache-Control", "no-store");
+        headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
+        headers.set("Access-Control-Allow-Headers", "Content-Type");
+        headers.set("Access-Control-Allow-Credentials", "true");
+
+        String origin = exchange.getRequestHeaders().getFirst("Origin");
+        if (origin != null && ALLOWED_ORIGIN.equals(origin)) {
+            headers.set("Access-Control-Allow-Origin", origin);
+        }
+        headers.set("Content-Type", "application/json; charset=UTF-8");
+    }
+
+    private static <T> T readJson(HttpExchange exchange, Class<T> type)
+            throws IOException {
         try (InputStream input = exchange.getRequestBody()) {
-            String requestBody = new String(input.readAllBytes(), StandardCharsets.UTF_8);
-            if (requestBody == null || requestBody.isBlank()) {
+            String body = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            if (body.trim().isEmpty()) {
                 return null;
             }
-            return gson.fromJson(requestBody, type);
+            return GSON.fromJson(body, type);
         } catch (JsonParseException e) {
             throw new IllegalArgumentException("Invalid JSON request.");
         }
+    }
+
+    private static Map<String, String> parseQuery(String query) {
+        Map<String, String> values = new LinkedHashMap<>();
+        for (String pair : query.split("&")) {
+            if (pair.isEmpty()) {
+                continue;
+            }
+            String[] parts = pair.split("=", 2);
+            String key = URLDecoder.decode(parts[0], StandardCharsets.UTF_8);
+            String value = parts.length > 1
+                    ? URLDecoder.decode(parts[1], StandardCharsets.UTF_8)
+                    : "";
+            values.put(key, value);
+        }
+        return values;
     }
 
     private static int parsePositiveInt(String value, String fieldName) {
         try {
             int parsed = Integer.parseInt(value.trim());
             if (parsed <= 0) {
-                throw new IllegalArgumentException(fieldName + " must be a positive integer.");
+                throw new IllegalArgumentException(
+                        fieldName + " must be a positive integer."
+                );
             }
             return parsed;
         } catch (NumberFormatException e) {
@@ -590,89 +485,82 @@ public class ApiServer {
         }
     }
 
-    private static Skill.Level parseSkillLevel(String levelText) {
-        if (levelText == null || levelText.trim().isEmpty()) {
-            return Skill.Level.BEGINNER;
-        }
-
-        try {
-            return Skill.Level.valueOf(levelText.trim().toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Skill level must be one of BEGINNER, INTERMEDIATE, ADVANCED or EXPERT.");
-        }
+    private static Map<String, Object> studentToMap(Student student) {
+        Map<String, Object> profile = new LinkedHashMap<>();
+        profile.put("userId", student.getUserId());
+        profile.put("name", student.getName());
+        profile.put("email", student.getEmail());
+        profile.put("offeredSkills", skillsToMap(student.getOfferedSkills()));
+        profile.put("wantedSkills", skillsToMap(student.getWantedSkills()));
+        return profile;
     }
 
-    private static void loadStudentsFromDatabase() {
-        try {
-            if (!DBConnection.isConfigured()) {
-                System.out.println("Supabase database is not configured. The API will run in in-memory mode.");
-                return;
-            }
-
-            List<Student> students = studentDAO.getAllStudents();
-            for (Student student : students) {
-                system.registerStudent(student);
-            }
-            System.out.println("Loaded " + students.size() + " student(s) from Supabase PostgreSQL.");
-        } catch (Exception e) {
-            System.out.println("Could not load students from the database: " + e.getMessage());
+    private static List<Map<String, Object>> skillsToMap(List<Skill> skills) {
+        List<Map<String, Object>> values = new ArrayList<>();
+        for (Skill skill : skills) {
+            values.add(skillToMap(skill));
         }
+        return values;
     }
 
-    private static void addCorsHeaders(HttpExchange exchange) {
-        Headers headers = exchange.getResponseHeaders();
-        headers.set("Access-Control-Allow-Origin", "http://localhost:5173");
-        headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        headers.set("Access-Control-Allow-Headers", "Content-Type");
-        headers.set("Content-Type", "application/json; charset=UTF-8");
+    private static Map<String, Object> skillToMap(Skill skill) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("skillId", skill.getSkillId());
+        value.put("skillName", skill.getSkillName());
+        return value;
     }
 
-    private static void sendJson(HttpExchange exchange, int statusCode, Object data) throws IOException {
-        byte[] response = gson.toJson(data).getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+    private static Map<String, Object> success(String message, Object data) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("success", true);
+        response.put("message", message);
+        response.put("data", data);
+        return response;
+    }
+
+    private static void sendJson(
+            HttpExchange exchange,
+            int statusCode,
+            Object body) throws IOException {
+        byte[] response = GSON.toJson(body).getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set(
+                "Content-Type", "application/json; charset=UTF-8"
+        );
         exchange.sendResponseHeaders(statusCode, response.length);
-
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(response);
         }
     }
 
-    private static void sendError(HttpExchange exchange, int statusCode, String message) throws IOException {
+    private static void sendError(
+            HttpExchange exchange,
+            int statusCode,
+            String message) throws IOException {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("success", false);
         response.put("message", message);
         sendJson(exchange, statusCode, response);
     }
 
-    private static class StudentRequest {
-        Integer studentId;
+    private static final class RegisterRequest {
+        int studentId;
+        String name;
+        String email;
+        String password;
+    }
+
+    private static final class LoginRequest {
+        String email;
+        String password;
+    }
+
+    private static final class ProfileRequest {
         String name;
         String email;
     }
 
-    private static class StudentUpdateRequest {
-        String name;
-        String email;
-    }
-
-    private static class StudentSkillRequest {
+    private static final class SkillRequest {
         Boolean offered;
         String skillName;
-        String category;
-        String level;
-        String learningGoal;
-    }
-
-    private static class SessionRequest {
-        Integer mentorId;
-        Integer learnerId;
-        String skillName;
-        String date;
-        String time;
-    }
-
-    private static class RatingRequest {
-        Integer score;
-        String feedback;
     }
 }
